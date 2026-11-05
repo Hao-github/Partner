@@ -127,3 +127,7 @@ class ConfigTests(ProjectTest):
         ):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 replace(self.settings, **changes).validate()
+
+    def test_secret_is_hidden_from_config_repr(self):
+        settings = replace(self.settings, qq_app_secret="private-secret")
+        self.assertNotIn("private-secret", repr(settings))

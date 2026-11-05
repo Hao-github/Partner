@@ -71,12 +71,14 @@ GPTPartner/
 │       │   └── _gateway.py        内部 WebSocket 实现
 │       └── wechat/README.md       微信渠道预留与选型边界
 ├── tests/
-│   ├── helpers.py                 测试数据、临时数据库与 mock 基础
-│   ├── test_config.py
-│   ├── test_agent.py
-│   ├── test_providers.py
-│   ├── test_cli.py
-│   └── test_tools.py
+│   ├── helpers.py                 测试数据、临时数据库、网络保护与 RecordingChannel
+│   ├── test_app.py                应用组装、入口与会话模型切换
+│   ├── test_channels.py           渠道公共流程、工厂与 CLI
+│   ├── test_config.py             配置读取、校验与凭据隐藏
+│   ├── test_core.py               Agent 循环与本地工具
+│   ├── test_providers.py          模型协议、请求与重试
+│   ├── test_qq.py                 QQ 启动、渠道、HTTP 与网关
+│   └── test_storage.py            数据兼容与事务回滚
 ├── .env.example
 ├── environment.yml
 ├── pyproject.toml
@@ -208,6 +210,8 @@ python -m pyright
 ```
 
 测试使用 mock 模型、临时数据库，不调用真实服务。生产入口只连接配置的模型。真实模型与 QQ 连通性需在本机配置凭据后验证。
+
+测试按职责集中在以上 7 个模块，各组用独立 TestCase 区分；共享替身放在 `tests/helpers.py`，测试模块之间不互相导入。可用 `python -m unittest tests.test_app.ModelSwitchTests -v` 单独运行一组。
 
 Pyright 已启用 `reportDeprecated = "error"`，弃用 API 或类型重载会使检查失败。需要同时检查运行时弃用警告时，执行：
 

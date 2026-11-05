@@ -4,7 +4,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from ai_butler.channels import Channel, MessageHandler
 from ai_butler.config import Config
+from ai_butler.models import IncomingMessage
 from ai_butler.storage.sessions import SessionStore
 
 
@@ -40,3 +42,19 @@ class ProjectTest(unittest.TestCase):
         store = SessionStore(self.settings.db_path)
         self.addCleanup(store.close)
         return store
+
+
+class RecordingChannel(Channel):
+    """只替换平台收发，实际运行基类的会话与交付流程。"""
+
+    def __init__(self, settings: Config):
+        super().__init__(settings)
+        self.messages: list[IncomingMessage] = []
+        self.sent: list[str] = []
+
+    def _receive(self, handler: MessageHandler) -> None:
+        for message in self.messages:
+            self._process(message, handler)
+
+    def _send(self, incoming: IncomingMessage, text: str) -> None:
+        self.sent.append(text)

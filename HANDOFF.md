@@ -4,14 +4,15 @@
 
 ## 当前状态
 
-项目：`C:\Users\HUAWEI\Desktop\program\GPTPartner`。QQ 官方机器人「莫念」的本人私聊此前已经完成真实收发与模型工具调用；本轮完成结构整理和对话内模型切换，验证使用 mock 模型、临时数据库。当前没有常驻机器人进程。
+项目：`C:\Users\HUAWEI\Desktop\program\GPTPartner`。QQ 官方机器人「莫念」的本人私聊此前已经完成真实收发与模型工具调用，已有结构整理和对话内模型切换。本轮在项目目录的新 Git 仓库建立历史基线并整理测试，验证使用 mock 模型、临时数据库。当前没有常驻机器人进程。
 
 本轮用户要求均已实现：
 
-- 对话中用 `/model` 切换模型，选择按会话持久化，其他会话不受影响。
-- 命令行入口移到根目录 `main.py`，删除 `first.py` 和包内 `ai_butler/main.py`。
-- 数据结构集中到 `ai_butler/models/`，删除 `core/messages.py`，统一从 `ai_butler.models` 导入。
-- 更新本交接文档，并把当前项目提交到本地 Git；不推送远端。
+- 确认项目目录已单独 `git init`，后续历史迭代使用这里的仓库。
+- 先提交现有代码基线 `27a6ae4`，再单独提交测试整理，便于对比和回退。
+- 测试文件从 14 个合并为 7 个，保留全部 77 项测试的断言和流程。
+- 共享 `RecordingChannel` 移入 `tests/helpers.py`，测试模块之间不再互相导入；渠道工厂测试归入渠道，QQ 凭据隐藏测试归入配置。
+- 更新 README 和本交接文档；仅本地提交，不推送远端。
 
 ## 环境与约定
 
@@ -49,7 +50,7 @@ python main.py --channel cli --provider deepseek --model deepseek-flash
 python main.py --session personal
 ```
 
-根目录 main.py、`python -m ai_butler` 和 `ai-butler` 使用同一个 main 函数。pyproject 的控制台入口已改为 `main:main`，通过 `py-modules = ["main"]` 安装根模块。本轮已在 gptpartner 中离线刷新本地可编辑安装并验证 `ai-butler --help`。
+根目录 main.py、`python -m ai_butler` 和 `ai-butler` 使用同一个 main 函数。pyproject 的控制台入口已改为 `main:main`，通过 `py-modules = ["main"]` 安装根模块。此前已在 gptpartner 中离线刷新本地可编辑安装并验证 `ai-butler --help`。
 
 Python API：
 
@@ -136,8 +137,22 @@ GPTPartner/
 
 ## 验证与本地 Git
 
-本轮：77 项单元与流程测试通过，Ruff check / format check 通过，Pyright 0 errors / 0 warnings。新增覆盖会话模型切换、保持历史、会话隔离、重启恢复、错误配置恢复、旧 QQ 命令重推、事务回滚和根目录入口。测试不调用真实模型或发送 QQ 消息。
+测试按职责集中在 7 个模块，每个模块内部保留独立 TestCase：
 
-Git 仓库实际根目录为 `C:\Users\HUAWEI\Desktop\program`，GPTPartner 此前尚未被跟踪。本轮提交范围仅为 GPTPartner 目录；父目录的 .gitignore、Lotus.py 及其他未跟踪文件属于已有独立改动，不混入提交。真实 .env、数据库、缓存和构建产物均通过项目 .gitignore 排除。
+| 模块 | 范围 |
+| --- | --- |
+| `tests/test_app.py` | 应用组装、入口、会话模型切换 |
+| `tests/test_channels.py` | 渠道公共流程、工厂、CLI |
+| `tests/test_config.py` | 配置读取、校验、凭据隐藏 |
+| `tests/test_core.py` | Agent 循环、本地工具 |
+| `tests/test_providers.py` | 模型协议、请求、重试 |
+| `tests/test_qq.py` | QQ 启动、渠道、HTTP、WebSocket 网关 |
+| `tests/test_storage.py` | 数据兼容、事务回滚 |
 
-本交接文档与实现一起提交。本地提交标识请在项目目录执行 `git log -1 --oneline -- .` 查看；不推送远端。
+共享数据、临时数据库、网络禁止保护及 `RecordingChannel` 放在 `tests/helpers.py`。新增测试优先放入对应模块和 TestCase；出现独立职责或模块过大时再拆分。单组运行示例：`python -m unittest tests.test_app.ModelSwitchTests -v`。
+
+本轮：整理前后均为 77 项单元与流程测试通过，Ruff check / format check 通过，Pyright 0 errors / 0 warnings。覆盖会话模型切换、保持历史、会话隔离、重启恢复、错误配置恢复、旧 QQ 命令重推、事务回滚和根目录入口。整理时逐项比对全部测试方法，保留原有断言和流程。测试不调用真实模型或发送 QQ 消息。
+
+Git 仓库实际根目录已是 `C:\Users\HUAWEI\Desktop\program\GPTPartner`，当前分支为 `master`；旧文档中关于使用父目录仓库的说明已经失效。现有代码基线为 `27a6ae4`（`chore: establish GPTPartner project baseline`），测试整理另作一个提交。真实 .env、数据库、缓存和构建产物均通过项目 .gitignore 排除。
+
+本交接文档与整理一起提交。本地提交标识请在项目目录执行 `git log -2 --oneline` 查看；后续按独立改动提交到此仓库，不推送远端。

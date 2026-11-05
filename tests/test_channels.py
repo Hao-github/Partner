@@ -1,27 +1,13 @@
+from contextlib import redirect_stdout
 from dataclasses import replace
+from io import StringIO
 from unittest.mock import Mock, patch
 
-from ai_butler.channels import Channel, MessageHandler
-from ai_butler.config import Config
+from ai_butler.channels import create_channel, inspect_channel
 from ai_butler.core.agent import Agent
-from ai_butler.models import IncomingMessage
-from tests.helpers import ProjectTest
-
-
-class RecordingChannel(Channel):
-    """只替换平台收发，实际运行基类的会话与交付流程。"""
-
-    def __init__(self, settings: Config):
-        super().__init__(settings)
-        self.messages: list[IncomingMessage] = []
-        self.sent: list[str] = []
-
-    def _receive(self, handler: MessageHandler) -> None:
-        for message in self.messages:
-            self._process(message, handler)
-
-    def _send(self, incoming: IncomingMessage, text: str) -> None:
-        self.sent.append(text)
+from ai_butler.models import IncomingMessage, Reply
+from main import main
+from tests.helpers import ProjectTest, RecordingChannel
 
 
 class ChannelTests(ProjectTest):
@@ -131,3 +117,70 @@ class ChannelTests(ProjectTest):
         with self.assertRaisesRegex(RuntimeError, "本地会话存取失败"):
             channel.history("test:a")
         handler.assert_not_called()
+
+    def test_channel_is_usable_without_a_provider(self):
+        handler = Mock(return_value=Reply("自定义回复"))
+        channel = create_channel("cli", settings=self.settings)
+        self.addCleanup(channel.close)
+        output = StringIO()
+        with patch("builtins.input", side_effect=["获取消息", "/exit"]), redirect_stdout(output):
+            channel.receive(handler)
+        handler.assert_called_once_with(
+            IncomingMessage("cli", "local", "live:default", "获取消息"), []
+        )
+        self.assertIn("管家> 自定义回复", output.getvalue())
+
+    def test_unknown_channel_and_unsupported_diagnostics_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "不支持的渠道"):
+            create_channel("unknown", settings=self.settings)
+        with self.assertRaisesRegex(ValueError, "只有 QQ"):
+            inspect_channel("cli", settings=self.settings)
+
+
+class CLITests(ProjectTest):
+    def run_cli(self, inputs, *, settings=None, response=None):
+        output = StringIO()
+        with (
+            patch("main.config", settings or self.settings),
+            patch("ai_butler.providers.DeepSeekProvider") as provider,
+            patch("builtins.input", side_effect=inputs),
+            redirect_stdout(output),
+        ):
+            provider.return_value.complete.return_value = response or {
+                "role": "assistant",
+                "content": "你好，小华",
+            }
+            status = main([])
+        return status, output.getvalue(), provider.return_value
+
+    def test_chat_history_switching_and_restart(self):
+        status, output, _ = self.run_cli(["我叫小华", "/session other", "/history", "/exit"])
+        self.assertEqual(status, 0)
+        self.assertIn("当前会话暂无记录", output)
+        status, _, provider = self.run_cli(["继续", "/exit"])
+        self.assertEqual(status, 0)
+        self.assertEqual(provider.complete.call_args.args[0][1]["content"], "我叫小华")
+
+    def test_missing_key_does_not_create_database(self):
+        status, output, _ = self.run_cli([], settings=replace(self.settings, deepseek_api_key=""))
+        self.assertEqual(status, 2)
+        self.assertIn("DEEPSEEK_API_KEY", output)
+        self.assertFalse(self.settings.db_path.exists())
+
+    def test_removed_demo_option_is_rejected(self):
+        with (
+            redirect_stdout(StringIO()),
+            patch("sys.stderr", new_callable=StringIO),
+            self.assertRaises(SystemExit) as error,
+        ):
+            main(["--demo"])
+        self.assertEqual(error.exception.code, 2)
+
+    def test_eof_commands_and_model_error_are_recoverable(self):
+        status, output, _ = self.run_cli(["", "/unknown", "/session bad/name", "/help", EOFError()])
+        self.assertEqual(status, 0)
+        self.assertIn("未知命令", output)
+        with patch("ai_butler.app.Agent.reply", side_effect=RuntimeError("网络错误")):
+            status, output, _ = self.run_cli(["你好", "/exit"])
+        self.assertEqual(status, 0)
+        self.assertIn("网络错误", output)
