@@ -3,7 +3,7 @@ from typing import Any
 from urllib.request import Request
 
 from ..models import Message
-from ._base import Provider
+from ._base import Provider, _response_errors
 
 
 class DeepSeekProvider(Provider):
@@ -36,28 +36,24 @@ class DeepSeekProvider(Provider):
         return self._parse_message(self._request(request))
 
     @staticmethod
+    @_response_errors("DeepSeek")
     def _parse_message(payload: Any) -> Message:
-        try:
-            choice = payload["choices"][0]
-            if choice.get("finish_reason") in {
-                "length",
-                "content_filter",
-                "insufficient_system_resource",
-                "aborted",
-            }:
-                raise RuntimeError("DeepSeek 回复被截断或中止，请缩短输入、调整输出上限后重试。")
-            source = choice["message"]
-            content = source.get("content")
-            message: Message = {"role": "assistant", "content": content}
-            if calls := source.get("tool_calls"):
-                message["tool_calls"] = calls
-            elif not isinstance(content, str) or not content.strip():
-                raise ValueError
-            return message
-        except (KeyError, IndexError, TypeError, AttributeError, ValueError):
-            raise RuntimeError(
-                "DeepSeek 返回了无法识别的消息格式，请检查模型和 API 地址。"
-            ) from None
+        choice = payload["choices"][0]
+        if choice.get("finish_reason") in {
+            "length",
+            "content_filter",
+            "insufficient_system_resource",
+            "aborted",
+        }:
+            raise RuntimeError("DeepSeek 回复被截断或中止，请缩短输入、调整输出上限后重试。")
+        source = choice["message"]
+        content = source.get("content")
+        message: Message = {"role": "assistant", "content": content}
+        if calls := source.get("tool_calls"):
+            message["tool_calls"] = calls
+        elif not isinstance(content, str) or not content.strip():
+            raise ValueError
+        return message
 
     @staticmethod
     def _status_message(status: int) -> str:

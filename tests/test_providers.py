@@ -118,22 +118,41 @@ class ProviderTests(ProjectTest):
         with self.assertRaisesRegex(RuntimeError, "JSON"):
             client.complete([], [TIME_TOOL])
 
-    def test_bad_completion_and_truncated_output(self):
+    def test_response_format_errors_are_safe_and_not_retried(self):
         for name in ("deepseek", "openai"):
+            client = self.client(provider=name)
             for payload in (
-                {},
+                {"private": "private-key"},
                 [],
                 {"choices": []},
+                {"choices": [None]},
                 completion(None),
                 completion(""),
-                completion("partial", finish="length"),
-                completion("blocked", finish="content_filter"),
             ):
                 with self.subTest(name=name, payload=payload):
-                    client = self.client(provider=name)
+                    self.open.reset_mock()
                     self.open.return_value = BytesIO(json.dumps(payload).encode())
-                    with self.assertRaises(RuntimeError):
+                    with self.assertRaisesRegex(RuntimeError, "无法识别的消息格式") as error:
                         client.complete([], [])
+                    self.assertIn(name, str(error.exception).lower())
+                    self.assertNotIn("private-key", str(error.exception))
+                    self.assertIsNone(error.exception.__cause__)
+                    self.assertEqual(self.open.call_count, 1)
+            self.open.return_value = self.response()
+            self.assertEqual(client.complete([], []), {"role": "assistant", "content": "你好"})
+
+    def test_truncated_output_keeps_provider_error_without_retry(self):
+        for name in ("deepseek", "openai"):
+            for finish in ("length", "content_filter"):
+                with self.subTest(name=name, finish=finish):
+                    client = self.client(provider=name)
+                    self.open.return_value = BytesIO(
+                        json.dumps(completion("partial", finish=finish)).encode()
+                    )
+                    with self.assertRaisesRegex(RuntimeError, "截断或中止") as error:
+                        client.complete([], [])
+                    self.assertIn(name, str(error.exception).lower())
+                    self.assertEqual(self.open.call_count, 1)
 
     def test_metadata_is_removed(self):
         for name in ("deepseek", "openai"):

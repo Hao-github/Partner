@@ -2,6 +2,8 @@ import json
 import logging
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Generator
+from contextlib import contextmanager
 from http.client import HTTPException
 from typing import Any, ClassVar
 from urllib.error import HTTPError
@@ -11,6 +13,17 @@ from ..config import Config, config
 from ..models import Message
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _response_errors(provider: str) -> Generator[None, None, None]:
+    """可作解析器装饰器；仅转换格式错误，保留供应商明确的失败提示。"""
+    try:
+        yield
+    except (KeyError, IndexError, TypeError, AttributeError, ValueError):
+        raise RuntimeError(
+            f"{provider} 返回了无法识别的消息格式，请检查模型和 API 地址。"
+        ) from None
 
 
 class Provider(ABC):
