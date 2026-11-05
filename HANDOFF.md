@@ -4,9 +4,13 @@
 
 ## 当前状态
 
-项目：`C:\Users\HUAWEI\Desktop\program\GPTPartner`。QQ 官方机器人「莫念」的本人私聊此前已经完成真实收发与模型工具调用，支持对话内模型切换。运行入口已统一为 Agent，渠道和模型实现收为内部模块。本轮完成码风精简和接入扩展边界：以后新增模型供应商或渠道，只新增实现和工厂选择分支，主循环不维护具体名单。验证使用 mock 模型、临时数据库；当前没有常驻机器人进程。
+项目：`C:\Users\HUAWEI\Desktop\program\GPTPartner`。QQ 官方机器人「莫念」的本人私聊此前已经完成真实收发与模型工具调用，支持对话内模型切换。运行入口已统一为 Agent，渠道和模型实现收为内部模块。最新代码迭代为 `99440c7`，验证使用 mock 模型、临时数据库；当前没有常驻机器人进程。
 
-本轮用户要求均已实现：
+本轮建立 [docs 文档入口](docs/README.md) 和 [CHANGELOG](CHANGELOG.md)。用户强调除内容设计外还要考虑架构完整性，因此文档覆盖依赖、数据契约、事务、资源生命周期、失败恢复、扩展责任及分阶段验收。SOUL.md、长期记忆、MCP、Skill、睡梦机制和常驻运行均仍是待实现设计，本轮没有修改运行代码或数据库。
+
+工作区同期增加了 [优化计划](docs/optimization-plan.md) 及 AGENTS.md 的评估、归档规则；后续沿用稳定 OPT 编号，候选/暂缓与已完成分别记录，完整完成项在 CHANGELOG 归档，计划保留追溯链接。
+
+最近代码迭代（99440c7）：
 
 - 启动时由工厂创建默认 Provider，将其已解析配置和实例直接交给 Agent 缓存；后续模型选择仍按需创建并复用。
 - 工具轮次使用有界循环，供应商解析用赋值表达式读取工具调用，路径归一化复用 pathlib 的绝对路径语义。
@@ -93,53 +97,14 @@ CLI 和 QQ 使用同一组命令：
 
 ## 结构和职责
 
-```text
-GPTPartner/
-├── main.py                       唯一 main 函数和参数解析
-├── ai_butler/
-│   ├── config.py                 配置 dataclass、.env 读取和校验
-│   ├── models/
-│   │   ├── __init__.py            统一数据类型导出
-│   │   ├── messages.py            IncomingMessage / Reply / Message
-│   │   └── session.py             ModelSelection / Delivery
-│   ├── core/agent.py              公开 Agent：主循环、模型路由、工具执行
-│   ├── providers/
-│   │   ├── _base.py               内部 Provider 接口、HTTP 与重试
-│   │   ├── _openai.py             OpenAI 接口、请求、解析与错误提示
-│   │   └── _deepseek.py           DeepSeek 接口、请求、解析与错误提示
-│   ├── storage/sessions.py        轮次、会话模型、回复缓存的原子保存
-│   ├── tools/                    工具定义与执行分发
-│   └── channels/
-│       ├── _base.py               内部历史、模型选择、去重、保存、发送状态
-│       ├── cli/_channel.py        内部终端输入输出与命令
-│       ├── qq/
-│       │   ├── _channel.py        内部 QQ 收发、白名单、限速、工作线程、检查/识别
-│       │   ├── _client.py         内部 HTTP、token 与平台回复
-│       │   └── _gateway.py        内部 WebSocket、心跳与重连
-│       └── wechat/README.md       尚未实现
-├── tests/                        模型 mock、临时数据库和网络禁止保护
-├── pyproject.toml
-├── environment.yml
-├── AGENTS.md
-└── HANDOFF.md
-```
+完整设计维护在 [架构设计](docs/architecture.md)，后续人设、记忆和工具能力见 [能力设计](docs/capabilities.md)，优先级和完成条件见 [演进与验收](docs/roadmap.md)。修改边界时同步更新这些文件，不在 HANDOFF 复制整份设计。
 
-- 数据类集中在 models；Config 仍在 config.py，保持配置读取集中。Agent、渠道等行为类保留在对应业务模块，不把全部类堆到一个目录。
-- 对外仅使用 Agent 的 `run()`、`close()` 和静态诊断入口 `inspect(channel, discover=False, settings=config)`。不再直接组合渠道与 Provider，也不再提供公开的单轮 reply 方法。
-- 内部 CLIChannel 和 QQChannel 显式继承 Channel，共用 receive、reply、history、close；平台实现 `_receive`、`_send`、可选 `_close` 和错误文案钩子。
-- 内部回调为 `(incoming, history) -> Reply`。IncomingMessage.model 携带已保存的会话选择；Reply.model 非空表示本次更新选择，None 表示保留。Reply.messages 为完整成功轮次；空列表只发送文本。
-- Channel 基类集中打开和关闭一个当前线程内的 SQLite 连接，并统一存储错误。CLI、QQ、Agent 不直接创建 SessionStore。
-- Agent 按 ModelSelection 复用 Provider，在 `_complete_turn` 中执行模型与工具循环；会话状态仍由渠道存储提供，Agent 不持有会话历史。
-- Provider 仅共用 HTTP/JSON 传输与有限重试，不理解供应商消息协议；两家供应商分别在 `_openai.py`、`_deepseek.py` 组装请求并通过私有 `_parse_message`、`_status_message` 处理响应。OpenAI 使用 max_completion_tokens，DeepSeek 使用 max_tokens 并关闭 thinking。
-- 下划线模块和空的子包导出列表标明内部实现边界，不通过调用栈检查、访问令牌等机制阻止 Python 导入。测试允许直接验证内部实现，应用代码只通过 Agent 运行。
-- 现有架构使用 Agent 门面、Provider 策略/适配器、内部简单工厂、Channel 模板方法及 SessionStore 事务封装。新供应商维护配置、独立实现和工厂选择；新渠道实现已有生命周期钩子，继续通过统一消息接入。
-- 新 Provider 声明 default_model、default_base_url，并在 `_provider_type` 增加 case。工厂用供应商名称前缀读取 Key、模型和地址，校验后创建实例；Config.select_model 仅清除跨供应商的旧选择，具体默认值到工厂再补齐。Config 原来的 deepseek_api_key、openai_api_key 字段已改为通用 options 快照及 api_key 属性；测试用 dataclasses.replace 和字典合并创建副本，原有 .env Key 名称保持不变。
-- 新 Channel 构造器接收 Config，实现 `_receive(handler)`、`_send(incoming, text)`，按需实现 `_close()`、inspect，再在 `_channel_type` 增加 case。平台需提供独立的 session_id / message_id 命名空间，接入 HTTP、WebSocket、轮询等细节留在实现内。当前统一协议覆盖文本和工具调用，新媒体能力需另行扩展消息协议。
-- 保留 turns、deliveries 的原表与消息键，新增 session_models；不需要清空旧库。轮次、模型选择和回复缓存同一事务保存，写入失败全部回滚。
-- 网络发送与数据库发送状态仍是两个步骤；QQ 使用原 msg_id、固定 msg_seq=1 和平台重复码处理重试，不宣称严格恰好一次交付。
-- 删除过设计的 network 层、自定义 opener 和 NoRedirect；HTTP 实现直接使用标准库 urlopen。
-- websockets 为正式依赖，不使用可选 QQ 依赖、动态模块加载或缺依赖兜底。
-- contextmanager 本身继续使用；`_store()` 返回注解为 `Generator[SessionStore, None, None]`，已修复旧 Iterator 重载的弃用告警。
+- 保持 core、providers、storage、tools、channels、models 分层，应用通过 Agent 的 run、close、inspect 运行。
+- Channel 公共流程管理历史、去重、保存和交付；Agent 通过回调返回 Reply，不直接创建 SessionStore。连接只在当前处理线程使用。
+- 新供应商或渠道在现有文本/工具契约内只需各自实现、工厂导入和类型选择分支；新增媒体或不同协议能力先调整统一契约。
+- 模型默认值归子类，专属配置来自 Config.options；业务层不重新读取环境。Config.model / base_url 可以暂空，由工厂补齐。
+- 保存对话、模型选择和回复缓存为同一事务，平台发送与标记另行发生；当前没有独立补发或 schema 版本迁移。
+- 本轮优先设计输入预算、SIGTERM 和投递恢复，再做人设与显式长期记忆；后台整理不自动改写人格或复活已忘记事实。
 
 ## QQ 现有边界
 
@@ -154,11 +119,9 @@ GPTPartner/
 
 用户目前没有云服务器，选择先规划小型 Linux 云服务器方案，使本机关闭后 QQ 机器人仍能运行。
 
-- 初步建议单台 Ubuntu LTS 云服务器、单个 QQ 进程，由 systemd 管理开机启动、异常重启和日志。起步资源按 1–2 核、2 GB 内存、20 GB 以上磁盘估算；模型通过 API 调用，不需要 GPU。
-- 当前实现主动建立出站 WebSocket / HTTPS 连接，没有业务监听端口；现有接入方式不要求新增域名或公开 HTTP 回调服务。服务器地区需按 QQ 接口及实际模型服务的支持地区和连通性选择。
-- 延续 Conda `gptpartner` 环境及 `python main.py --channel qq` 入口，配置仍由 config.py 集中读取。服务器凭据独立配置，不进入 Git。
-- SQLite 使用持久磁盘上的固定路径，保留单实例运行；迁移旧聊天记录前停掉本机机器人并备份数据库，切换后避免本地和云端同时接入同一机器人。
-- 后续落地需准备 systemd 服务配置、停止信号处理方案、数据库备份及发布/回退步骤，再在目标服务器验证重启恢复和真实 QQ 收发。当前仅规划，没有购买服务器、上传凭据或部署运行。
+选定方向为单台 Linux LTS、Conda gptpartner、单实例 QQ、SQLite 持久目录和 systemd 管理。资源仅有 1–2 核、2 GB 内存、20 GB 以上磁盘的初始估算，购买前仍需验证地区和服务访问条件。
+
+停止信号、投递恢复、备份、迁移和发布回退的完整约束见 [运行与可靠性](docs/operations.md)。当前仅规划，没有购买服务器、上传凭据、安装服务或部署运行；不得在未实现 SIGTERM 和停止期限前将服务监督配置视为上线完成。
 
 ## 验证与本地 Git
 
@@ -178,6 +141,6 @@ GPTPartner/
 
 本轮：84 项单元与流程测试通过，Ruff check / format check 通过，Pyright 0 errors / 0 warnings。继续覆盖会话隔离、模型切换、重启恢复、旧 QQ 命令重推、事务回滚、公开 Agent 工具调用、供应商解析和重试。新增：QQ 已登录连接超过初始登录期限继续运行、Config 新凭据的隐藏和快照、第三种 Provider + Channel 只扩展工厂分支即可完成 CLI 启动/模型切换/落库/关闭、通用诊断不创建模型。重试覆盖 0/1/2 次额外重试，工具测试覆盖耗尽工具轮次后的最终回答。第三种协议仅为测试替身，不是 Grok/Gemini 或新平台的真实接入。
 
-Git 仓库实际根目录已是 `C:\Users\HUAWEI\Desktop\program\GPTPartner`，当前分支为 `master`；旧文档中关于使用父目录仓库的说明已经失效。历史基线为 `27a6ae4`，测试整理为 `f56468b`，`.vscode/` 取消跟踪及云端规划为 `f154d8f`，Agent 接口收拢及供应商拆分为 `dbb2c99`。本轮码风、计数器和接入扩展边界另作独立提交。真实 .env、数据库、缓存和构建产物均通过项目 .gitignore 排除。
+Git 仓库实际根目录已是 `C:\Users\HUAWEI\Desktop\program\GPTPartner`，当前分支为 `master`；旧文档中关于使用父目录仓库的说明已经失效。历史基线为 `27a6ae4`，测试整理为 `f56468b`，`.vscode/` 取消跟踪及云端规划为 `f154d8f`，Agent 接口收拢及供应商拆分为 `dbb2c99`，码风、计数器和接入扩展边界为 `99440c7`。本轮文档体系另作独立提交，历史摘要见 CHANGELOG.md。真实 .env、数据库、缓存和构建产物均通过项目 .gitignore 排除。
 
 本交接文档与实现一起提交。本地提交标识请在项目目录执行 `git log -5 --oneline` 查看；后续按独立改动提交到此仓库，不推送远端。

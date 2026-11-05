@@ -2,6 +2,8 @@
 
 终端与 QQ 私聊、SQLite 会话历史、模型工具调用。渠道和模型分别通过基类封装，使用时只需选择渠道、供应商和模型。
 
+内部设计见 [docs 文档入口](docs/README.md)；优化想法、评估和状态见 [优化计划](docs/optimization-plan.md)，已完成事项见 [变更归档](CHANGELOG.md)。
+
 ## 直接使用
 
 已有凭据继续放在项目根目录 `.env`。激活环境后，可以直接指定组合：
@@ -42,86 +44,22 @@ CLI 和 QQ 都可直接发送以下命令：
 
 ## 文件职责
 
-```text
-GPTPartner/
-├── main.py                        命令行与 IDE 运行入口
-├── ai_butler/
-│   ├── config.py                  读取 .env，提供共享 dataclass config
-│   ├── models/
-│   │   ├── messages.py            IncomingMessage / Reply / Message
-│   │   └── session.py             ModelSelection / Delivery
-│   ├── core/
-│   │   └── agent.py               公开 Agent：主循环、模型路由与工具调用
-│   ├── providers/
-│   │   ├── _base.py               内部 Provider 接口、HTTP 与重试
-│   │   ├── _openai.py             OpenAI 请求、解析与错误提示
-│   │   └── _deepseek.py           DeepSeek 请求、解析与错误提示
-│   ├── storage/
-│   │   └── sessions.py            一次事务保存会话、模型选择与回复缓存
-│   ├── tools/
-│   │   ├── registry.py            工具描述与执行分发
-│   │   └── clock.py               本地北京时间工具
-│   └── channels/
-│       ├── _base.py               内部 Channel：历史、去重、保存、交付
-│       ├── cli/
-│       │   └── _channel.py        内部 CLIChannel：终端输入、命令、输出
-│       ├── qq/
-│       │   ├── _channel.py        内部 QQChannel：平台收发、检查与识别
-│       │   ├── _client.py         内部 HTTP 实现
-│       │   └── _gateway.py        内部 WebSocket 实现
-│       └── wechat/README.md       微信渠道预留与选型边界
-├── tests/
-│   ├── helpers.py                 测试数据、临时数据库、网络保护与 RecordingChannel
-│   ├── test_app.py                应用组装、入口与会话模型切换
-│   ├── test_channels.py           渠道公共流程、工厂与 CLI
-│   ├── test_config.py             配置读取、校验与凭据隐藏
-│   ├── test_core.py               Agent 循环与本地工具
-│   ├── test_providers.py          模型协议、请求与重试
-│   ├── test_qq.py                 QQ 启动、渠道、HTTP 与网关
-│   └── test_storage.py            数据兼容与事务回滚
-├── .env.example
-├── environment.yml
-├── pyproject.toml
-└── AGENTS.md
-```
-
 数据流为 **Agent.run → Channel 收消息、读取会话 → Agent 路由模型、执行模型与工具循环 → Reply → Channel 保存并发送**。
 
-- `CLIChannel`、`QQChannel` 显式继承 `Channel`；`OpenAIProvider`、`DeepSeekProvider` 通过共用传输层继承 `Provider`。
-- 对外运行入口只有 `Agent`，公开方法为 `run()`、`close()` 和诊断用的 `inspect()`。Agent 在内部创建渠道、按供应商和模型复用 Provider，处理模型命令和工具循环。
-- `models` 集中存放跨层传递的数据类，统一从 `ai_butler.models` 导入。Config 保留在 config.py，集中读取配置；运行逻辑仍放在各自的业务模块中。
-- `providers`、`channels` 不再公开工厂或实现类，具体实现放在带下划线的模块中；QQ 的 client、gateway 由内部 QQChannel 组装。应用代码通过 Agent 使用它们，测试可直接验证内部实现。
-- Channel 基类统一负责历史读取、去重、回复缓存、保存、发送状态和连接生命周期。CLI、QQ 不导入 storage，也不识别 SQLite 异常；新增平台直接复用这些行为。
-- 渠道通过 `receive(handler)` 串行调用 `handler(incoming, history)`，业务返回 `Reply(text, messages)`。QQ 在工作线程运行这段公共流程，网关接收和心跳不受模型耗时影响。
+入口和配置在根目录及 config.py；core 编排，providers 适配模型，channels 管理接入与交付，storage 保证持久化一致性，tools 提供工具，models 定义跨层数据。完整职责与依赖见 [架构设计](docs/architecture.md)。
 
-- Agent 不直接访问 storage；内部模型循环接收统一消息和历史，返回完整成功轮次，不修改传入的历史。
-- `providers` 负责模型协议。OpenAI、DeepSeek 直接继承 Provider，各自维护接口路径、认证、请求参数、响应解析及错误提示；基类只共用 HTTP/JSON 传输与有限重试，没有额外的 ChatCompletionsProvider 中间层。
-- `storage/sessions.py` 在同一事务保存完整轮次、模型选择与回复缓存，隐藏 SQLite 连接。已有表和消息键继续使用，新增 session_models 表保存会话选择。
-- `tools` 现在只有本地工具。MCP 是后续引入远端工具的一种接入方式，届时在工具层增加客户端并通过 registry 供 Agent 使用。
-- QQ 目录已实现官方机器人 WebSocket 单聊；微信仍预留。渠道不导入 Agent 或模型实现，平台收发协议放在各自渠道目录中。
-- HTTP 请求直接在各自实现中使用标准库 `urllib.request.urlopen`，不再单独封装 network 层。
+## 文档导航
 
-## 架构与扩展约定
+| 文档 | 内容 |
+| --- | --- |
+| [文档入口](docs/README.md) | 阅读顺序、实现状态与维护约定 |
+| [架构设计](docs/architecture.md) | 依赖图、消息契约、事务、生命周期、扩展和设计决策 |
+| [能力设计](docs/capabilities.md) | SOUL.md、上下文、长期记忆、MCP、Skill、睡梦与主动任务 |
+| [运行与可靠性](docs/operations.md) | Linux 常驻、发送恢复、备份、发布与回退方案 |
+| [演进与验收](docs/roadmap.md) | 阶段顺序、架构完整性清单和测试落点 |
+| [变更记录](CHANGELOG.md) | 已完成变化和本地开发历史 |
 
-| 模式 | 对应实现 | 扩展边界 |
-| --- | --- | --- |
-| 门面 | `Agent` | 应用只选择配置并调用 run、close、inspect |
-| 策略与适配器 | `Provider` 子类、具体渠道 | 各自维护供应商或平台协议，通过统一消息交互 |
-| 简单工厂 | `_provider_type`、`_channel_type` 和创建入口 | 类型选择集中在 match 分支，统一应用配置 |
-| 模板方法 | `Channel._process` 及收发、关闭钩子 | 公共流程管理历史、去重和保存，平台实现收发与资源清理 |
-| 存储封装与事务 | `SessionStore` | 同一事务保存轮次、模型选择和回复缓存 |
-
-新增供应商时，在独立模块实现 Provider 的 complete、响应归一化和错误提示，并在子类声明 default_model、default_base_url；最后只在 `_provider_type` 添加一个 case。Key 按 `{供应商名大写}_API_KEY` 读取，模型和地址还可通过同前缀的 `_MODEL`、`_BASE_URL` 覆盖。默认值和供应商名单都不写进 Agent 或 Config。
-
-新增渠道时，子类构造器接收 Config，实现 `_receive(handler)`、`_send(incoming, text)`；按需实现 `_close()` 和类方法 inspect，再在 `_channel_type` 添加一个 case。消息必须转为 IncomingMessage，并生成渠道独立的用户、会话和消息键。新渠道配置直接从 `settings.options` 字典取值，需要时用 int、float 转换，校验留在渠道构造边界。
-
-CLI 的供应商和渠道名称直接交给工厂选择，诊断统一使用 `--check`、`--discover`。Agent、模型与工具循环、会话存储均不区分具体供应商和平台。QQ 网关在自己的模块中用状态变量及 match 分派协议事件。当前统一协议覆盖文本与工具调用；新增媒体能力时需另外扩展消息协议。
-
-测试中加入了第三种 Provider 和 Channel，只替换两处类型选择分支，完整验证 CLI 启动、供应商专属配置、模型切换、历史保存和渠道关闭；通用诊断也验证不会创建模型。测试替身只存在于 tests。
-
-动态文本统一优先使用 f-string，日志布局使用花括号模板；SQL 数据使用参数绑定。短路用于默认值与条件，赋值表达式用于一次读取后立即判断；保留会话、心跳、缓存和关闭流程所需的状态。代码使用 Ruff 统一格式，Pyright 检查类型。
-
-优先直接使用字典和标准库，不为取值、类型转换或单纯转发再增加方法。保留承担协议适配、校验、资源管理和共享业务规则的接口。
+当前已完成文本聊天 MVP；人设文件、长期记忆、MCP、Skill、睡梦整理和云端常驻均处于设计阶段。文档中的拟议模块与命令不代表当前程序已支持。
 
 ## 安装与启动
 
@@ -230,7 +168,7 @@ python -m pyright
 
 测试使用 mock 模型、临时数据库，不调用真实服务。生产入口只连接配置的模型。真实模型与 QQ 连通性需在本机配置凭据后验证。
 
-测试按职责集中在以上 7 个模块，各组用独立 TestCase 区分；共享替身放在 `tests/helpers.py`，测试模块之间不互相导入。可用 `python -m unittest tests.test_app.ModelSwitchTests -v` 单独运行一组。
+测试按职责集中在 7 个模块，各组用独立 TestCase 区分；共享替身放在 `tests/helpers.py`，测试模块之间不互相导入。职责对应见 [验证落点](docs/roadmap.md)。可用 `python -m unittest tests.test_app.ModelSwitchTests -v` 单独运行一组。
 
 Pyright 已启用 `reportDeprecated = "error"`，弃用 API 或类型重载会使检查失败。需要同时检查运行时弃用警告时，执行：
 
