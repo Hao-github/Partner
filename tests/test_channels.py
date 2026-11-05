@@ -3,8 +3,8 @@ from dataclasses import replace
 from io import StringIO
 from unittest.mock import Mock, patch
 
-from ai_butler.channels import create_channel, inspect_channel
-from ai_butler.core.agent import Agent
+from ai_butler import Agent
+from ai_butler.channels import _create_channel
 from ai_butler.models import IncomingMessage, Reply
 from main import main
 from tests.helpers import ProjectTest, RecordingChannel
@@ -19,7 +19,7 @@ class ChannelTests(ProjectTest):
     def agent(self):
         self.provider = Mock()
         self.provider.complete.return_value = {"role": "assistant", "content": "收到"}
-        return Agent(self.provider, self.settings)
+        return self.create_agent(self.provider)
 
     def incoming(self, text="你好", session="test:a", message=""):
         return IncomingMessage("test", "user", session, text, message)
@@ -28,11 +28,11 @@ class ChannelTests(ProjectTest):
         agent = self.agent()
         first = self.channel()
         first.messages = [self.incoming("我叫小华")]
-        first.receive(agent.reply)
+        first.receive(agent._respond)
         first.close()
         second = self.channel()
         second.messages = [self.incoming("继续")]
-        second.receive(agent.reply)
+        second.receive(agent._respond)
         messages = self.provider.complete.call_args.args[0]
         self.assertEqual(messages[1], {"role": "user", "content": "我叫小华"})
         self.assertEqual(second.history("test:b"), [])
@@ -43,7 +43,7 @@ class ChannelTests(ProjectTest):
         channel.messages = [
             self.incoming(text) for text in ("第一条", "第二条", "第三条", "第四条")
         ]
-        channel.receive(self.agent().reply)
+        channel.receive(self.agent()._respond)
         messages = self.provider.complete.call_args.args[0]
         self.assertEqual(
             [m["content"] for m in messages if m["role"] == "user"], ["第二条", "第三条", "第四条"]
@@ -56,10 +56,10 @@ class ChannelTests(ProjectTest):
         incoming = self.incoming(message="same-message")
         first = self.channel()
         first.messages = [incoming, incoming]
-        first.receive(agent.reply)
+        first.receive(agent._respond)
         second = self.channel()
         second.messages = [incoming]
-        second.receive(agent.reply)
+        second.receive(agent._respond)
         self.provider.complete.assert_called_once()
         self.assertEqual(first.sent, ["收到"])
         self.assertEqual(second.sent, [])
@@ -74,10 +74,10 @@ class ChannelTests(ProjectTest):
             patch.object(channel, "_send", side_effect=RuntimeError("network")),
             self.assertRaises(RuntimeError),
         ):
-            channel.receive(agent.reply)
+            channel.receive(agent._respond)
         cached = self.store().get_delivery(incoming)
         self.assertEqual(cached and (cached.reply, cached.sent), ("收到", False))
-        channel.receive(agent.reply)
+        channel.receive(agent._respond)
         self.provider.complete.assert_called_once()
         self.assertEqual(channel.sent, ["收到"])
         self.assertEqual(len(channel.history(incoming.session_id)), 2)
@@ -88,7 +88,7 @@ class ChannelTests(ProjectTest):
         channel = self.channel()
         incoming = self.incoming()
         channel.messages = [incoming, incoming]
-        channel.receive(self.agent().reply)
+        channel.receive(self.agent()._respond)
         self.assertEqual(self.provider.complete.call_count, 2)
         self.assertEqual(len(channel.history(incoming.session_id)), 4)
 
@@ -96,13 +96,13 @@ class ChannelTests(ProjectTest):
         channel = self.channel()
         agent = self.agent()
         channel.messages = [self.incoming("之前")]
-        channel.receive(agent.reply)
+        channel.receive(agent._respond)
         before = channel.history("test:a")
         incoming = self.incoming("失败轮次", message="failed")
         channel.messages = [incoming]
         self.provider.complete.side_effect = RuntimeError("request failed")
         with self.assertRaises(RuntimeError):
-            channel.receive(agent.reply)
+            channel.receive(agent._respond)
         self.assertEqual(channel.history("test:a"), before)
         self.assertIsNone(self.store().get_delivery(incoming))
 
@@ -120,7 +120,7 @@ class ChannelTests(ProjectTest):
 
     def test_channel_is_usable_without_a_provider(self):
         handler = Mock(return_value=Reply("自定义回复"))
-        channel = create_channel("cli", settings=self.settings)
+        channel = _create_channel("cli", settings=self.settings)
         self.addCleanup(channel.close)
         output = StringIO()
         with patch("builtins.input", side_effect=["获取消息", "/exit"]), redirect_stdout(output):
@@ -132,9 +132,9 @@ class ChannelTests(ProjectTest):
 
     def test_unknown_channel_and_unsupported_diagnostics_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "不支持的渠道"):
-            create_channel("unknown", settings=self.settings)
+            _create_channel("unknown", settings=self.settings)
         with self.assertRaisesRegex(ValueError, "只有 QQ"):
-            inspect_channel("cli", settings=self.settings)
+            Agent.inspect("cli", settings=self.settings)
 
 
 class CLITests(ProjectTest):
@@ -142,7 +142,7 @@ class CLITests(ProjectTest):
         output = StringIO()
         with (
             patch("main.config", settings or self.settings),
-            patch("ai_butler.providers.DeepSeekProvider") as provider,
+            patch("ai_butler.providers._DeepSeekProvider") as provider,
             patch("builtins.input", side_effect=inputs),
             redirect_stdout(output),
         ):
@@ -180,7 +180,9 @@ class CLITests(ProjectTest):
         status, output, _ = self.run_cli(["", "/unknown", "/session bad/name", "/help", EOFError()])
         self.assertEqual(status, 0)
         self.assertIn("未知命令", output)
-        with patch("ai_butler.app.Agent.reply", side_effect=RuntimeError("网络错误")):
+        with patch(
+            "ai_butler.core.agent.Agent._complete_turn", side_effect=RuntimeError("网络错误")
+        ):
             status, output, _ = self.run_cli(["你好", "/exit"])
         self.assertEqual(status, 0)
         self.assertIn("网络错误", output)

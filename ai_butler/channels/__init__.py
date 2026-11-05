@@ -1,14 +1,14 @@
-"""渠道公共入口；调用方只接触统一消息和收发接口。"""
+"""Agent 内部的渠道工厂，不作为应用调用接口。"""
 
 from ..config import Config, config
-from .base import Channel, MessageHandler
-from .cli import CLIChannel as _CLIChannel
-from .qq import QQChannel as _QQChannel
+from ._base import Channel as _Channel
+from .cli._channel import CLIChannel as _CLIChannel
+from .qq._channel import QQChannel as _QQChannel
 
-__all__ = ["Channel", "MessageHandler", "create_channel", "inspect_channel"]
+__all__: list[str] = []
 
 
-def create_channel(name: str, *, session: str = "default", settings: Config = config) -> Channel:
+def _create_channel(name: str, *, session: str = "default", settings: Config = config) -> _Channel:
     if name == "cli":
         return _CLIChannel(session, settings)
     if name == "qq":
@@ -16,7 +16,7 @@ def create_channel(name: str, *, session: str = "default", settings: Config = co
     raise ValueError(f"不支持的渠道：{name}")
 
 
-def inspect_channel(name: str, *, discover: bool = False, settings: Config = config) -> None:
+def _inspect_channel(name: str, *, discover: bool = False, settings: Config = config) -> None:
     """检查渠道连接或识别发送者，不调用模型。"""
     if name != "qq":
         raise ValueError("只有 QQ 渠道支持连接检查和发送者识别。")

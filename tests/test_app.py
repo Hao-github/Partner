@@ -8,22 +8,38 @@ from pathlib import Path
 from threading import Event
 from unittest.mock import patch
 
-from ai_butler import Butler
+from ai_butler import Agent
 from ai_butler.models import IncomingMessage, ModelSelection
-from ai_butler.providers import create_provider
+from ai_butler.providers import _create_provider
 from main import main
-from tests.helpers import ProjectTest, RecordingChannel
+from tests.helpers import ProjectTest, RecordingChannel, tool_message
 
 
 class AppTests(ProjectTest):
+    @patch("ai_butler.core.agent._create_provider")
+    def test_public_agent_runs_tools_and_saves_the_complete_turn(self, factory):
+        provider = factory.return_value
+        provider.complete.side_effect = [
+            tool_message("clock"),
+            {"role": "assistant", "content": "北京时间已获取"},
+        ]
+        output = StringIO()
+        with patch("builtins.input", side_effect=["几点了", "/exit"]), redirect_stdout(output):
+            Agent(settings=self.settings).run()
+        factory.assert_called_once()
+        self.assertIn("北京时间已获取", output.getvalue())
+        turn = self.store().load("live:default")
+        self.assertEqual(
+            [message["role"] for message in turn], ["user", "assistant", "tool", "assistant"]
+        )
+        self.assertEqual(turn[2]["tool_call_id"], "clock")
+
     def test_cli_runtime_options_select_model_without_mutating_shared_config(self):
         settings = replace(self.settings, openai_api_key="test-openai")
         with (
             patch("main.config", settings),
-            patch("ai_butler.app.create_provider", wraps=create_provider) as factory,
-            patch(
-                "ai_butler.providers.chat_completions.ChatCompletionsProvider.complete"
-            ) as complete,
+            patch("ai_butler.core.agent._create_provider", wraps=_create_provider) as factory,
+            patch("ai_butler.providers._openai.OpenAIProvider.complete") as complete,
             patch("builtins.input", side_effect=["测试消息", "/exit"]),
             redirect_stdout(StringIO()),
         ):
@@ -38,8 +54,8 @@ class AppTests(ProjectTest):
         self.assertEqual(settings.model, "deepseek-flash")
         self.assertEqual(len(self.store().load("live:default")), 2)
 
-    @patch("ai_butler.channels.qq.channel._QQGateway")
-    @patch("ai_butler.channels.qq.channel._QQClient")
+    @patch("ai_butler.channels.qq._channel._QQGateway")
+    @patch("ai_butler.channels.qq._channel._QQClient")
     def test_qq_app_preserves_context_and_hides_transport_from_provider(self, client, gateway):
         settings = replace(
             self.settings,
@@ -62,9 +78,9 @@ class AppTests(ProjectTest):
 
         client.return_value.send_text.side_effect = send
         gateway.return_value.run.side_effect = run
-        with patch("ai_butler.providers.DeepSeekProvider") as provider:
+        with patch("ai_butler.providers._DeepSeekProvider") as provider:
             provider.return_value.complete.return_value = {"role": "assistant", "content": "收到"}
-            Butler(channel="qq", settings=settings).run()
+            Agent(channel="qq", settings=settings).run()
         self.assertEqual(client.return_value.send_text.call_count, 2)
         messages = provider.return_value.complete.call_args.args[0]
         self.assertEqual(
@@ -75,17 +91,17 @@ class AppTests(ProjectTest):
         gateway.return_value.close.assert_called_once()
 
     def test_run_closes_channel_even_when_receive_is_interrupted(self):
-        with patch("ai_butler.app.create_channel") as factory:
+        with patch("ai_butler.core.agent._create_channel") as factory:
             channel = factory.return_value
             channel.receive.side_effect = KeyboardInterrupt()
-            app = Butler(settings=self.settings)
+            app = Agent(settings=self.settings)
             with self.assertRaises(KeyboardInterrupt):
                 app.run()
         channel.close.assert_called_once()
 
     def test_application_logs_metadata_without_message_body_or_secret(self):
         with (
-            patch("ai_butler.app.create_provider") as provider,
+            patch("ai_butler.core.agent._create_provider") as provider,
             patch("builtins.input", side_effect=["private-body", "/exit"]),
             redirect_stdout(StringIO()),
             self.assertLogs("ai_butler", level="INFO") as logs,
@@ -94,7 +110,7 @@ class AppTests(ProjectTest):
                 "role": "assistant",
                 "content": "private-reply",
             }
-            Butler(settings=self.settings).run()
+            Agent(settings=self.settings).run()
         output = str(logs.output)
         self.assertIn("app_started", output)
         self.assertIn("message_received", output)
@@ -136,8 +152,8 @@ class ModelSwitchTests(ProjectTest):
         settings = settings or replace(self.settings, openai_api_key="test-openai")
         with (
             patch("main.config", settings),
-            patch("ai_butler.providers.DeepSeekProvider") as deepseek,
-            patch("ai_butler.providers.OpenAIProvider") as openai,
+            patch("ai_butler.providers._DeepSeekProvider") as deepseek,
+            patch("ai_butler.providers._OpenAIProvider") as openai,
             patch("builtins.input", side_effect=inputs),
             redirect_stdout(output),
         ):
@@ -259,12 +275,12 @@ class ModelSwitchTests(ProjectTest):
             IncomingMessage("qq", "owner", session, "继续", "3"),
         ]
         with (
-            patch("ai_butler.app.create_channel", return_value=channel),
-            patch("ai_butler.providers.DeepSeekProvider") as deepseek,
-            patch("ai_butler.providers.OpenAIProvider") as openai,
+            patch("ai_butler.core.agent._create_channel", return_value=channel),
+            patch("ai_butler.providers._DeepSeekProvider") as deepseek,
+            patch("ai_butler.providers._OpenAIProvider") as openai,
         ):
             deepseek.return_value.complete.return_value = {"role": "assistant", "content": "收到"}
-            Butler(channel="qq", settings=settings).run()
+            Agent(channel="qq", settings=settings).run()
         self.assertEqual(len(channel.sent), 3)
         self.assertEqual(
             self.store().get_model(session), ModelSelection("deepseek", "second-model")

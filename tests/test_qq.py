@@ -11,8 +11,9 @@ from urllib.error import HTTPError
 from websockets.exceptions import ConnectionClosedError
 from websockets.frames import Close
 
-from ai_butler.channels import create_channel, inspect_channel
-from ai_butler.channels.qq import QQChannel
+from ai_butler import Agent
+from ai_butler.channels import _create_channel
+from ai_butler.channels.qq._channel import QQChannel
 from ai_butler.channels.qq._client import QQClient
 from ai_butler.channels.qq._gateway import QQGateway
 from ai_butler.models import IncomingMessage, Reply
@@ -34,26 +35,26 @@ class QQStartupTests(ProjectTest):
     def test_normal_mode_requires_allowlist(self):
         settings = replace(self.settings, qq_app_id="123", qq_app_secret="secret")
         with self.assertRaisesRegex(ValueError, "QQ_ALLOWED_USERS"):
-            create_channel("qq", settings=settings)
+            _create_channel("qq", settings=settings)
 
-    @patch("ai_butler.channels.qq.channel._QQClient")
+    @patch("ai_butler.channels.qq._channel._QQClient")
     def test_check_does_not_require_model_key_or_send_messages(self, client):
         settings = replace(
             self.settings, qq_app_id="123", qq_app_secret="secret", deepseek_api_key=""
         )
         with redirect_stdout(StringIO()):
-            inspect_channel("qq", settings=settings)
+            Agent.inspect("qq", settings=settings)
         client.return_value.gateway_url.assert_called_once()
         client.return_value.send_text.assert_not_called()
 
-    @patch("ai_butler.channels.qq.channel._QQGateway")
-    @patch("ai_butler.channels.qq.channel._QQClient")
+    @patch("ai_butler.channels.qq._channel._QQGateway")
+    @patch("ai_butler.channels.qq._channel._QQClient")
     def test_discovery_does_not_require_model_key(self, client, gateway):
         settings = replace(
             self.settings, qq_app_id="123", qq_app_secret="secret", deepseek_api_key=""
         )
         with redirect_stdout(StringIO()):
-            inspect_channel("qq", discover=True, settings=settings)
+            Agent.inspect("qq", discover=True, settings=settings)
         gateway.return_value.run.assert_called_once()
         gateway.return_value.close.assert_called_once()
         client.return_value.send_text.assert_not_called()
@@ -69,7 +70,7 @@ class QQChannelTests(ProjectTest):
             qq_min_interval=0,
         )
         self.client = Mock()
-        with patch("ai_butler.channels.qq.channel._QQClient", return_value=self.client):
+        with patch("ai_butler.channels.qq._channel._QQClient", return_value=self.client):
             channel = QQChannel(self.qq_settings)
         self.addCleanup(channel.close)
         return channel
@@ -84,8 +85,8 @@ class QQChannelTests(ProjectTest):
         channel._process(self.incoming(), handler)
         self.client.send_text.assert_called_once_with("owner", "message", "模型回答")
         handler.assert_called_once_with(self.incoming(), [])
-        with patch("ai_butler.channels.qq.channel._QQClient", return_value=self.client):
-            restarted = create_channel("qq", settings=self.qq_settings)
+        with patch("ai_butler.channels.qq._channel._QQClient", return_value=self.client):
+            restarted = _create_channel("qq", settings=self.qq_settings)
         self.addCleanup(restarted.close)
         self.assertIsInstance(restarted, QQChannel)
         assert isinstance(restarted, QQChannel)
@@ -122,7 +123,7 @@ class QQChannelTests(ProjectTest):
             submit.assert_not_called()
         handler.assert_not_called()
 
-    @patch("ai_butler.channels.qq.channel._QQGateway")
+    @patch("ai_butler.channels.qq._channel._QQGateway")
     def test_receive_converts_events_and_runs_handler_off_gateway_thread(self, gateway):
         channel = self.channel()
         received = []
@@ -213,7 +214,7 @@ class QQChannelTests(ProjectTest):
         channel._slots.acquire()
         future = Future()
         future.set_exception(RuntimeError("private-secret"))
-        with self.assertLogs("ai_butler.channels.qq.channel") as logs:
+        with self.assertLogs("ai_butler.channels.qq._channel") as logs:
             channel._done(future)
         self.assertNotIn("private-secret", str(logs.output))
 

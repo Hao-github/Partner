@@ -5,7 +5,7 @@ from threading import BoundedSemaphore
 
 from ...config import Config, config
 from ...models import IncomingMessage
-from ..base import Channel, MessageHandler
+from .._base import Channel, MessageHandler
 from ._client import QQClient as _QQClient
 from ._gateway import QQGateway as _QQGateway
 

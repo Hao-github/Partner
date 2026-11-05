@@ -1,8 +1,7 @@
 import argparse
 import logging
 
-from ai_butler.app import Butler
-from ai_butler.channels import inspect_channel
+from ai_butler import Agent
 from ai_butler.config import config
 
 
@@ -29,9 +28,9 @@ def main(argv=None) -> int:
     )
     try:
         if args.qq_check or args.qq_discover:
-            inspect_channel(args.channel, discover=args.qq_discover, settings=config)
+            Agent.inspect(args.channel, discover=args.qq_discover, settings=config)
             return 0
-        Butler(
+        Agent(
             args.channel,
             provider=args.provider,
             model=args.model,

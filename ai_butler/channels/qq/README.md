@@ -1,6 +1,6 @@
 # QQ 官方机器人私聊
 
-已实现本地 WebSocket 私聊接入。`QQChannel(Channel)` 只实现平台收发，继承基类的历史读取、去重、回复缓存与保存流程。业务回调接收统一消息与历史，返回 `Reply`；模型调用由 Butler 组装，QQ 实现不导入 Agent 或 storage。2026-11-05 曾完成真实 QQ 入站、OpenAI 时间工具调用和私聊回复；后续封装调整通过临时数据库和 mock 网络验证，完整状态见项目根目录 HANDOFF.md。
+已实现 WebSocket 私聊接入。内部 `QQChannel(Channel)` 实现平台收发，继承基类的历史读取、去重、回复缓存与保存流程。Agent 统一创建渠道和模型，内部回调接收统一消息与历史并返回 `Reply`；QQ 实现不导入 Agent 或 storage。2026-11-05 曾完成真实 QQ 入站、OpenAI 时间工具调用和私聊回复；后续封装调整通过临时数据库和 mock 网络验证，完整状态见项目根目录 HANDOFF.md。
 
 ## 1. 创建并添加机器人
 
@@ -77,15 +77,15 @@ python main.py --channel qq --provider openai --model gpt-5-mini
 
 | 文件 | 职责 |
 | --- | --- |
-| `channel.py` | 唯一公开渠道类 QQChannel：平台收发、允许名单、工作线程、限速、检查与识别 |
+| `_channel.py` | 内部 QQChannel：平台收发、允许名单、工作线程、限速、检查与识别 |
 | `_client.py` | 内部 HTTP 实现：Access Token 缓存/刷新、网关查询、纯文本回复 |
 | `_gateway.py` | 内部 WebSocket 实现：Identify / Resume、事件接收、心跳和断线恢复 |
-| `channels/base.py` | 各渠道共用的会话、去重、保存、交付与存储错误处理 |
+| `channels/_base.py` | 各渠道共用的会话、去重、保存、交付与存储错误处理 |
 | `storage/sessions.py` | 同一事务保存对话与回复缓存，封装 SQLite 连接 |
 
 单个工作线程串行运行基类的公共流程，避免阻塞网关心跳。每条消息只在基类打开一个 SQLite 连接，提供历史给业务回调，再保存返回的完整轮次和回复缓存。回调只计算结果，不管理存储。会话键仍为 `qq:<appid>:c2c:<user_openid>`，与 CLI 及其他应用隔离。
 
-子包仅导出 QQChannel，业务层通过 `create_channel("qq")` 接入；HTTP 客户端与网关由渠道内部创建。`inspect_channel("qq")` 同样委托给渠道类，外层无需操作 QQClient 或 QQGateway。
+应用通过 `Agent(channel="qq").run()` 接入，诊断通过 `Agent.inspect("qq", discover=...)` 执行。渠道子包不再导出实现类；内部工厂创建 QQChannel，HTTP 客户端与网关继续由渠道内部创建。
 
 ## 当前行为与边界
 

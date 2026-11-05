@@ -1,10 +1,12 @@
 import os
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from ai_butler.channels import Channel, MessageHandler
+from ai_butler import Agent
+from ai_butler.channels._base import Channel, MessageHandler
 from ai_butler.config import Config
 from ai_butler.models import IncomingMessage
 from ai_butler.storage.sessions import SessionStore
@@ -25,6 +27,14 @@ def tool_call(call_id="call_1"):
     }
 
 
+def tool_message(*call_ids: str):
+    return {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [tool_call(call_id) for call_id in call_ids],
+    }
+
+
 class ProjectTest(unittest.TestCase):
     def setUp(self):
         guard = patch("socket.socket.connect", side_effect=AssertionError("测试禁止网络连接"))
@@ -42,6 +52,12 @@ class ProjectTest(unittest.TestCase):
         store = SessionStore(self.settings.db_path)
         self.addCleanup(store.close)
         return store
+
+    def create_agent(self, provider, **changes):
+        with patch("ai_butler.core.agent._create_provider", return_value=provider):
+            agent = Agent(settings=replace(self.settings, **changes))
+        self.addCleanup(agent.close)
+        return agent
 
 
 class RecordingChannel(Channel):

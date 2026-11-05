@@ -1,15 +1,12 @@
 import json
 import unittest
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock
 
-from ai_butler.core.agent import Agent
 from ai_butler.models import IncomingMessage
-from ai_butler.providers.chat_completions import parse_message
 from ai_butler.tools.clock import get_beijing_time
 from ai_butler.tools.registry import execute_tool
-from tests.helpers import ProjectTest, completion, tool_call
+from tests.helpers import ProjectTest, tool_message
 
 
 class AgentTests(ProjectTest):
@@ -22,7 +19,7 @@ class AgentTests(ProjectTest):
         ]
         before = list(history)
         incoming = IncomingMessage("test", "user", "a", "继续")
-        result = Agent(provider, self.settings).reply(incoming, history)
+        result = self.create_agent(provider)._respond(incoming, history)
         messages = provider.complete.call_args.args[0]
         self.assertEqual(messages[1:3], before)
         self.assertEqual(history, before)
@@ -33,10 +30,10 @@ class AgentTests(ProjectTest):
     def test_tool_results_are_sent_back_and_returned_in_complete_turn(self):
         provider = Mock()
         provider.complete.side_effect = [
-            parse_message(completion(None, calls=[tool_call("one"), tool_call("two")])),
+            tool_message("one", "two"),
             {"role": "assistant", "content": "当前北京时间。"},
         ]
-        result = Agent(provider, self.settings).reply(
+        result = self.create_agent(provider)._respond(
             IncomingMessage("test", "user", "a", "几点了"), []
         )
         messages = provider.complete.call_args.args[0]
@@ -52,11 +49,11 @@ class AgentTests(ProjectTest):
         before = list(history)
         provider = Mock()
         provider.complete.side_effect = [
-            parse_message(completion(None, calls=[tool_call()])),
+            tool_message("call_1"),
             RuntimeError("超时"),
         ]
         with self.assertRaises(RuntimeError):
-            Agent(provider, self.settings).reply(
+            self.create_agent(provider)._respond(
                 IncomingMessage("test", "user", "a", "时间"), history
             )
         self.assertEqual(history, before)
@@ -64,10 +61,10 @@ class AgentTests(ProjectTest):
 
     def test_tool_loop_limit_does_not_return_incomplete_turn(self):
         provider = Mock()
-        provider.complete.return_value = parse_message(completion(None, calls=[tool_call()]))
-        agent = Agent(provider, replace(self.settings, max_tool_rounds=1))
+        provider.complete.return_value = tool_message("call_1")
+        agent = self.create_agent(provider, max_tool_rounds=1)
         with self.assertRaisesRegex(RuntimeError, "上限"):
-            agent.reply(IncomingMessage("test", "user", "a", "时间"), [])
+            agent._respond(IncomingMessage("test", "user", "a", "时间"), [])
         self.assertEqual(provider.complete.call_count, 2)
         self.assertFalse(self.settings.db_path.exists())
 

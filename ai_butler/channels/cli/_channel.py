@@ -2,7 +2,7 @@ import re
 
 from ...config import Config, config
 from ...models import IncomingMessage
-from ..base import Channel, MessageHandler
+from .._base import Channel, MessageHandler
 
 _HELP = (
     "命令：/help 帮助；/session 名称 切换会话；/history 查看最近记录；"

@@ -8,8 +8,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ai_butler.config import Config, config
-from ai_butler.core.agent import Agent
-from ai_butler.providers.chat_completions import DeepSeekProvider
+from ai_butler.core import agent as agent_module
+from ai_butler.providers._deepseek import DeepSeekProvider
 from tests.helpers import ProjectTest
 
 
@@ -38,9 +38,8 @@ class ConfigTests(ProjectTest):
 
     def test_modules_share_the_same_config_instance(self):
         provider = DeepSeekProvider()
-        agent = Agent(provider)
         self.assertIs(provider.config, config)
-        self.assertIs(agent.config, config)
+        self.assertIs(agent_module.config, config)
 
     def test_dotenv_is_read_from_project_root_outside_working_directory(self):
         # 在临时包里导入真实 config.py，验证 .env 加载且不接触用户的密钥文件。
