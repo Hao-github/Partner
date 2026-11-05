@@ -9,16 +9,91 @@ from threading import Event
 from unittest.mock import patch
 
 from ai_butler import Agent
+from ai_butler import channels as channel_module
+from ai_butler import providers as provider_module
 from ai_butler.models import IncomingMessage, ModelSelection
 from ai_butler.providers import _create_provider
+from ai_butler.providers._openai import OpenAIProvider
 from main import main
-from tests.helpers import ProjectTest, RecordingChannel, tool_message
+from tests.helpers import (
+    ExtraProvider,
+    ProjectTest,
+    RecordingChannel,
+    configure_provider_mock,
+    tool_message,
+)
 
 
 class AppTests(ProjectTest):
+    def test_new_provider_and_channel_only_extend_the_factory_selections(self):
+        created: list[RecordingChannel] = []
+
+        class ExtraChannel(RecordingChannel):
+            def __init__(self, settings):
+                super().__init__(settings)
+                user = settings.options.get("EXTRA_USER", "owner")
+                self.messages = [
+                    IncomingMessage("extra", user, f"extra:{user}", "hello", "1"),
+                    IncomingMessage("extra", user, f"extra:{user}", "/model extra next", "2"),
+                    IncomingMessage("extra", user, f"extra:{user}", "again", "3"),
+                ]
+                created.append(self)
+
+        provider_type = provider_module._provider_type
+        channel_type = channel_module._channel_type
+        settings = replace(
+            self.settings,
+            options=self.settings.options
+            | {
+                "EXTRA_API_KEY": "test-extra-key",
+                "EXTRA_MODEL": "configured-extra",
+                "EXTRA_BASE_URL": "https://custom.extra.invalid",
+                "EXTRA_USER": "owner",
+            },
+        )
+        with (
+            patch.object(
+                provider_module,
+                "_provider_type",
+                side_effect=lambda name: ExtraProvider if name == "extra" else provider_type(name),
+            ),
+            patch.object(
+                channel_module,
+                "_channel_type",
+                side_effect=lambda name: ExtraChannel if name == "extra" else channel_type(name),
+            ),
+            patch("main.config", settings),
+            redirect_stdout(StringIO()),
+        ):
+            self.assertEqual(main(["--channel", "extra", "--provider", "extra"]), 0)
+        self.assertEqual(
+            created[0].sent, ["configured-extra: hello", "已切换模型：extra / next", "next: again"]
+        )
+        self.assertEqual(created[0]._settings.base_url, "https://custom.extra.invalid")
+        self.assertTrue(created[0]._stopping.is_set())
+        store = self.store()
+        self.assertEqual(len(store.load("extra:owner")), 4)
+        self.assertEqual(store.get_model("extra:owner"), ModelSelection("extra", "next"))
+
+    def test_new_channel_diagnostics_do_not_construct_a_model_or_channel(self):
+        for flag, discover in (("--check", False), ("--discover", True)):
+            with (
+                self.subTest(flag=flag),
+                patch("ai_butler.core.agent._channel_type", return_value=RecordingChannel),
+                patch.object(RecordingChannel, "inspect") as inspect,
+                patch.object(
+                    RecordingChannel, "__init__", side_effect=AssertionError("不应创建渠道")
+                ),
+                patch("ai_butler.core.agent._create_provider") as provider,
+                patch("main.config", self.settings),
+            ):
+                self.assertEqual(main(["--channel", "extra", flag]), 0)
+                inspect.assert_called_once_with(discover=discover, settings=self.settings)
+                provider.assert_not_called()
+
     @patch("ai_butler.core.agent._create_provider")
     def test_public_agent_runs_tools_and_saves_the_complete_turn(self, factory):
-        provider = factory.return_value
+        provider = configure_provider_mock(factory)
         provider.complete.side_effect = [
             tool_message("clock"),
             {"role": "assistant", "content": "北京时间已获取"},
@@ -35,7 +110,9 @@ class AppTests(ProjectTest):
         self.assertEqual(turn[2]["tool_call_id"], "clock")
 
     def test_cli_runtime_options_select_model_without_mutating_shared_config(self):
-        settings = replace(self.settings, openai_api_key="test-openai")
+        settings = replace(
+            self.settings, options=self.settings.options | {"OPENAI_API_KEY": "test-openai"}
+        )
         with (
             patch("main.config", settings),
             patch("ai_butler.core.agent._create_provider", wraps=_create_provider) as factory,
@@ -49,7 +126,7 @@ class AppTests(ProjectTest):
         selected = factory.call_args.args[0]
         self.assertEqual(selected.provider, "openai")
         self.assertEqual(selected.model, "test-model")
-        self.assertEqual(selected.base_url, "https://api.openai.com/v1")
+        self.assertEqual(selected.base_url, "")
         self.assertEqual(settings.provider, "deepseek")
         self.assertEqual(settings.model, "deepseek-flash")
         self.assertEqual(len(self.store().load("live:default")), 2)
@@ -79,6 +156,7 @@ class AppTests(ProjectTest):
         client.return_value.send_text.side_effect = send
         gateway.return_value.run.side_effect = run
         with patch("ai_butler.providers._DeepSeekProvider") as provider:
+            configure_provider_mock(provider)
             provider.return_value.complete.return_value = {"role": "assistant", "content": "收到"}
             Agent(channel="qq", settings=settings).run()
         self.assertEqual(client.return_value.send_text.call_count, 2)
@@ -106,6 +184,7 @@ class AppTests(ProjectTest):
             redirect_stdout(StringIO()),
             self.assertLogs("ai_butler", level="INFO") as logs,
         ):
+            configure_provider_mock(provider)
             provider.return_value.complete.return_value = {
                 "role": "assistant",
                 "content": "private-reply",
@@ -149,7 +228,9 @@ class EntrypointTests(ProjectTest):
 class ModelSwitchTests(ProjectTest):
     def run_cli(self, inputs, *, settings=None):
         output = StringIO()
-        settings = settings or replace(self.settings, openai_api_key="test-openai")
+        settings = settings or replace(
+            self.settings, options=self.settings.options | {"OPENAI_API_KEY": "test-openai"}
+        )
         with (
             patch("main.config", settings),
             patch("ai_butler.providers._DeepSeekProvider") as deepseek,
@@ -157,6 +238,8 @@ class ModelSwitchTests(ProjectTest):
             patch("builtins.input", side_effect=inputs),
             redirect_stdout(output),
         ):
+            configure_provider_mock(deepseek)
+            configure_provider_mock(openai, OpenAIProvider)
             deepseek.return_value.complete.return_value = {
                 "role": "assistant",
                 "content": "DeepSeek 回答",
@@ -264,7 +347,9 @@ class ModelSwitchTests(ProjectTest):
         self.assertEqual(len(self.store().load("live:default")), 2)
 
     def test_redelivering_old_qq_switch_does_not_revert_new_selection(self):
-        settings = replace(self.settings, openai_api_key="test-openai")
+        settings = replace(
+            self.settings, options=self.settings.options | {"OPENAI_API_KEY": "test-openai"}
+        )
         channel = RecordingChannel(settings)
         session = "qq:123:c2c:owner"
         first = IncomingMessage("qq", "owner", session, "/model openai first-model", "1")
@@ -279,6 +364,8 @@ class ModelSwitchTests(ProjectTest):
             patch("ai_butler.providers._DeepSeekProvider") as deepseek,
             patch("ai_butler.providers._OpenAIProvider") as openai,
         ):
+            configure_provider_mock(deepseek)
+            configure_provider_mock(openai, OpenAIProvider)
             deepseek.return_value.complete.return_value = {"role": "assistant", "content": "收到"}
             Agent(channel="qq", settings=settings).run()
         self.assertEqual(len(channel.sent), 3)

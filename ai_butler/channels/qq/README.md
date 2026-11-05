@@ -32,7 +32,7 @@ QQ_ALLOWED_USERS=
 ## 3. 检查 QQ 鉴权
 
 ```powershell
-python main.py --channel qq --qq-check
+python main.py --channel qq --check
 ```
 
 此模式验证 Access Token 和 `/gateway` 接口，不要求模型 Key 或用户允许名单，不调用模型、不发 QQ 消息。它不能代替实际收发权限验证。
@@ -40,7 +40,7 @@ python main.py --channel qq --qq-check
 ## 4. 获取自己的 OpenID
 
 ```powershell
-python main.py --channel qq --qq-discover
+python main.py --channel qq --discover
 ```
 
 看到“QQ 机器人已在线”后，在 QQ 中给机器人发一条私聊。终端会输出该发送者的 OpenID，并提示填写 `QQ_ALLOWED_USERS`。**这是机器人应用下的 OpenID，不是普通 QQ 号。** 确认是自己发送的消息后填写，再 Ctrl+C 退出识别模式。

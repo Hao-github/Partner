@@ -9,9 +9,11 @@ from ._base import Provider
 class OpenAIProvider(Provider):
     """内部 OpenAI 适配：维护请求参数、认证、响应格式及错误提示。"""
 
+    default_base_url = "https://api.openai.com/v1"
+
     def complete(self, messages: list[Message], tools: list[dict[str, Any]]) -> Message:
         request = Request(
-            self.config.base_url + "/chat/completions",
+            f"{self.config.base_url}/chat/completions",
             data=json.dumps(
                 {
                     "model": self.config.model,
@@ -40,8 +42,7 @@ class OpenAIProvider(Provider):
             source = choice["message"]
             content = source.get("content")
             message: Message = {"role": "assistant", "content": content}
-            calls = source.get("tool_calls") or []
-            if calls:
+            if calls := source.get("tool_calls"):
                 message["tool_calls"] = calls
             elif not isinstance(content, str) or not content.strip():
                 raise ValueError

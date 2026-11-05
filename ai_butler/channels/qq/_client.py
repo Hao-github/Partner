@@ -53,22 +53,22 @@ class QQClient:
         authenticated: bool = True,
         accepted_codes: tuple[int, ...] = (),
     ) -> dict[str, Any]:
-        attempt = 0
-        while True:
+        status = 0
+        for attempt in range(self.config.max_retries + 1):
             headers = {"Content-Type": "application/json"}
             if authenticated:
-                headers["Authorization"] = "QQBot " + self.access_token()
+                headers["Authorization"] = f"QQBot {self.access_token()}"
             request = Request(
-                self.config.qq_api_base_url.rstrip("/") + path,
+                f"{self.config.qq_api_base_url.rstrip('/')}{path}",
                 data=None if payload is None else json.dumps(payload, ensure_ascii=False).encode(),
                 headers=headers,
                 method=method,
             )
-            status = 200
             try:
                 try:
                     with urlopen(request, timeout=self.config.timeout) as response:
                         raw = response.read()
+                    status = 200
                 except HTTPError as error:
                     status = error.code
                     raw = error.read()
@@ -94,13 +94,10 @@ class QQClient:
                     return data
             except (OSError, HTTPException):
                 status = 0
-            if attempt == self.config.max_retries:
-                raise RuntimeError(
-                    f"QQ 请求失败或超时（HTTP {status}），请检查网络、凭据或稍后重试。"
-                )
-            logger.warning("qq_http_retry attempt=%d status=%d", attempt + 1, status)
-            time.sleep(min(2**attempt, 8))
-            attempt += 1
+            if attempt < self.config.max_retries:
+                logger.warning(f"qq_http_retry attempt={attempt + 1} status={status}")
+                time.sleep(min(2**attempt, 8))
+        raise RuntimeError(f"QQ 请求失败或超时（HTTP {status}），请检查网络、凭据或稍后重试。")
 
     def gateway_url(self) -> str:
         url = self.request("GET", "/gateway")["url"]
@@ -111,7 +108,7 @@ class QQClient:
     def send_text(self, user_id: str, message_id: str, text: str) -> None:
         limit = self.config.qq_reply_max_chars
         if len(text) > limit:
-            logger.info("reply_truncated channel=qq limit=%d", limit)
+            logger.info(f"reply_truncated channel=qq limit={limit}")
             notice = "\n（回复已截断，可继续提问。）"
             text = text[: max(limit - len(notice), 0)] + notice[:limit]
         self.request(

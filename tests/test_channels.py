@@ -7,7 +7,7 @@ from ai_butler import Agent
 from ai_butler.channels import _create_channel
 from ai_butler.models import IncomingMessage, Reply
 from main import main
-from tests.helpers import ProjectTest, RecordingChannel
+from tests.helpers import ProjectTest, RecordingChannel, configure_provider_mock
 
 
 class ChannelTests(ProjectTest):
@@ -133,7 +133,7 @@ class ChannelTests(ProjectTest):
     def test_unknown_channel_and_unsupported_diagnostics_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "不支持的渠道"):
             _create_channel("unknown", settings=self.settings)
-        with self.assertRaisesRegex(ValueError, "只有 QQ"):
+        with self.assertRaisesRegex(ValueError, "不支持渠道诊断"):
             Agent.inspect("cli", settings=self.settings)
 
 
@@ -146,6 +146,7 @@ class CLITests(ProjectTest):
             patch("builtins.input", side_effect=inputs),
             redirect_stdout(output),
         ):
+            configure_provider_mock(provider)
             provider.return_value.complete.return_value = response or {
                 "role": "assistant",
                 "content": "你好，小华",
@@ -162,7 +163,7 @@ class CLITests(ProjectTest):
         self.assertEqual(provider.complete.call_args.args[0][1]["content"], "我叫小华")
 
     def test_missing_key_does_not_create_database(self):
-        status, output, _ = self.run_cli([], settings=replace(self.settings, deepseek_api_key=""))
+        status, output, _ = self.run_cli([], settings=replace(self.settings, options={}))
         self.assertEqual(status, 2)
         self.assertIn("DEEPSEEK_API_KEY", output)
         self.assertFalse(self.settings.db_path.exists())

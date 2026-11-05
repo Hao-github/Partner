@@ -26,7 +26,7 @@ class QQGateway:
         self._socket: ClientConnection | None = None
 
     def identify(self) -> dict:
-        token = "QQBot " + self.client.access_token()
+        token = f"QQBot {self.client.access_token()}"
         if self.session_id:
             return {
                 "op": 6,
@@ -36,15 +36,15 @@ class QQGateway:
 
     def dispatch(self, payload: dict) -> None:
         self.sequence = payload["s"]
-        event = payload.get("t")
-        if event == "READY":
-            self.session_id = payload["d"]["session_id"]
-            logger.info("qq_gateway_ready")
-            print("QQ 机器人已在线，等待私聊。", flush=True)
-        elif event == "RESUMED":
-            logger.info("qq_session_resumed")
-        elif event == "C2C_MESSAGE_CREATE":
-            self.on_message(payload["d"])
+        match payload.get("t"):
+            case "READY":
+                self.session_id = payload["d"]["session_id"]
+                logger.info("qq_gateway_ready")
+                print("QQ 机器人已在线，等待私聊。", flush=True)
+            case "RESUMED":
+                logger.info("qq_session_resumed")
+            case "C2C_MESSAGE_CREATE":
+                self.on_message(payload["d"])
 
     def serve(self, socket: ClientConnection) -> None:
         hello = json.loads(socket.recv(timeout=self.client.config.timeout))
@@ -55,11 +55,10 @@ class QQGateway:
             raise RuntimeError("QQ 网关心跳周期无效。")
         socket.send(json.dumps(self.identify()))
         heartbeat_at = time.monotonic() + interval
-        login_deadline = time.monotonic() + self.client.config.timeout
-        logged_in = False
+        login_deadline: float | None = time.monotonic() + self.client.config.timeout
         waiting_ack = False
         while not self._stopping.is_set():
-            if not logged_in and time.monotonic() >= login_deadline:
+            if login_deadline is not None and time.monotonic() >= login_deadline:
                 raise RuntimeError("QQ 网关登录超时，请检查应用和事件权限。")
             if time.monotonic() >= heartbeat_at:
                 if waiting_ack:
@@ -68,36 +67,37 @@ class QQGateway:
                 waiting_ack = True
                 heartbeat_at = time.monotonic() + interval
             try:
-                deadline = heartbeat_at if logged_in else min(heartbeat_at, login_deadline)
+                deadline = min(heartbeat_at, login_deadline or heartbeat_at)
                 payload = json.loads(socket.recv(timeout=max(deadline - time.monotonic(), 0)))
             except TimeoutError:
                 continue
-            opcode = payload["op"]
-            if opcode == 0:
-                self.dispatch(payload)
-                if payload.get("t") in {"READY", "RESUMED"}:
-                    logged_in = True
-            elif opcode == 11:
-                waiting_ack = False
-            elif opcode == 1:
-                socket.send(json.dumps({"op": 1, "d": self.sequence}))
-                waiting_ack = True
-                heartbeat_at = time.monotonic() + interval
-            elif opcode in {7, 9}:
-                if opcode == 9 and not payload.get("d"):
-                    was_resuming = bool(self.session_id)
-                    self.session_id, self.sequence = "", None
-                    if not was_resuming:
-                        raise RuntimeError("QQ 网关鉴权失败，请检查凭据与 C2C 事件权限。")
-                raise ConnectionError("QQ 网关请求重新连接。")
+            match payload["op"]:
+                case 0:
+                    self.dispatch(payload)
+                    if payload.get("t") in {"READY", "RESUMED"}:
+                        login_deadline = None
+                case 11:
+                    waiting_ack = False
+                case 1:
+                    socket.send(json.dumps({"op": 1, "d": self.sequence}))
+                    waiting_ack = True
+                    heartbeat_at = time.monotonic() + interval
+                case 7 | 9 as opcode:
+                    if opcode == 9 and not payload.get("d"):
+                        was_resuming = bool(self.session_id)
+                        self.session_id, self.sequence = "", None
+                        if not was_resuming:
+                            raise RuntimeError("QQ 网关鉴权失败，请检查凭据与 C2C 事件权限。")
+                    raise ConnectionError("QQ 网关请求重新连接。")
 
     def run(self) -> None:
         delay = 1
         while not self._stopping.is_set():
             try:
-                url = self.client.gateway_url()
                 with connect(
-                    url, open_timeout=self.client.config.timeout, ping_interval=None
+                    self.client.gateway_url(),
+                    open_timeout=self.client.config.timeout,
+                    ping_interval=None,
                 ) as socket:
                     self._socket = socket
                     if not self._stopping.is_set():
@@ -114,7 +114,7 @@ class QQGateway:
                     self.session_id, self.sequence = "", None
                 if code == 4004:
                     self.client.invalidate_token()
-                logger.warning("qq_disconnected code=%s", code)
+                logger.warning(f"qq_disconnected code={code}")
             except (OSError, WebSocketException):
                 logger.warning("qq_disconnected network_or_handshake")
             except (ValueError, KeyError, TypeError):

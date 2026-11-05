@@ -3,12 +3,15 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from ai_butler import Agent
 from ai_butler.channels._base import Channel, MessageHandler
 from ai_butler.config import Config
-from ai_butler.models import IncomingMessage
+from ai_butler.models import IncomingMessage, Message
+from ai_butler.providers._base import Provider
+from ai_butler.providers._deepseek import DeepSeekProvider
 from ai_butler.storage.sessions import SessionStore
 
 
@@ -35,6 +38,32 @@ def tool_message(*call_ids: str):
     }
 
 
+def configure_provider_mock(factory, provider_type: type[Provider] = DeepSeekProvider):
+    factory.default_model = provider_type.default_model
+    factory.default_base_url = provider_type.default_base_url
+
+    def create(settings):
+        factory.return_value.config = settings
+        return factory.return_value
+
+    factory.side_effect = create
+    return factory.return_value
+
+
+class ExtraProvider(Provider):
+    """只在测试中使用的第三种协议适配，验证主流程不依赖供应商名称。"""
+
+    default_model = "extra-default"
+    default_base_url = "https://extra.invalid"
+
+    def complete(self, messages: list[Message], tools: list[dict[str, Any]]) -> Message:
+        return {"role": "assistant", "content": f"{self.config.model}: {messages[-1]['content']}"}
+
+    @staticmethod
+    def _status_message(status: int) -> str:
+        return f"Extra HTTP {status}"
+
+
 class ProjectTest(unittest.TestCase):
     def setUp(self):
         guard = patch("socket.socket.connect", side_effect=AssertionError("测试禁止网络连接"))
@@ -45,7 +74,10 @@ class ProjectTest(unittest.TestCase):
         self.root = Path(temp.name)
         with patch.dict(os.environ, {}, clear=True):
             self.settings = Config(
-                deepseek_api_key="test-secret", db_path=self.root / "sessions.sqlite3"
+                model="deepseek-flash",
+                base_url="https://api.deepseek.com",
+                options={"DEEPSEEK_API_KEY": "test-secret"},
+                db_path=self.root / "sessions.sqlite3",
             )
 
     def store(self):
@@ -54,8 +86,10 @@ class ProjectTest(unittest.TestCase):
         return store
 
     def create_agent(self, provider, **changes):
+        settings = replace(self.settings, **changes)
+        provider.config = settings
         with patch("ai_butler.core.agent._create_provider", return_value=provider):
-            agent = Agent(settings=replace(self.settings, **changes))
+            agent = Agent(settings=settings)
         self.addCleanup(agent.close)
         return agent
 

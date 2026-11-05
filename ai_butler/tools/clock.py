@@ -21,5 +21,5 @@ def get_beijing_time() -> dict:
     return {
         "timezone": "Asia/Shanghai",
         "datetime": now.isoformat(timespec="seconds"),
-        "weekday": "星期" + "一二三四五六日"[now.weekday()],
+        "weekday": f"星期{'一二三四五六日'[now.weekday()]}",
     }

@@ -41,7 +41,7 @@ class CLIChannel(Channel):
                     continue
                 print("管家正在思考…", flush=True)
                 incoming = IncomingMessage(
-                    channel="cli", user_id="local", session_id="live:" + self._session, text=text
+                    channel="cli", user_id="local", session_id=f"live:{self._session}", text=text
                 )
                 self._process(incoming, handler)
             except RuntimeError as error:
@@ -63,13 +63,13 @@ class CLIChannel(Channel):
         elif text.split(maxsplit=1)[0] == "/model":
             return False
         elif text.startswith("/"):
-            print("未知命令。" + _HELP)
+            print(f"未知命令。{_HELP}")
         else:
             return False
         return True
 
     def _show_history(self) -> None:
-        history = self.history("live:" + self._session)
+        history = self.history(f"live:{self._session}")
         if not history:
             print("当前会话暂无记录。")
         for message in history:
@@ -79,4 +79,4 @@ class CLIChannel(Channel):
 
     def _send(self, incoming: IncomingMessage, text: str) -> None:
         """在终端显示回复，不暴露输出格式给业务层。"""
-        print("管家> " + text)
+        print(f"管家> {text}")

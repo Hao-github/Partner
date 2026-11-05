@@ -58,7 +58,7 @@ class SessionStore:
         row = self._connection.execute(
             "SELECT provider, model FROM session_models WHERE session_id = ?", (session_id,)
         ).fetchone()
-        return ModelSelection(row[0], row[1]) if row else None
+        return ModelSelection(*row) if row else None
 
     def save(self, incoming: IncomingMessage, reply: Reply) -> None:
         """对话、模型选择与缓存同时提交；任何写入失败都回滚。"""
@@ -82,15 +82,16 @@ class SessionStore:
                 )
 
     def mark_sent(self, incoming: IncomingMessage) -> None:
-        if incoming.message_id:
-            with self._connection:
-                self._connection.execute(
-                    "UPDATE deliveries SET sent = 1 WHERE message_key = ?", (self._key(incoming),)
-                )
+        if not incoming.message_id:
+            return
+        with self._connection:
+            self._connection.execute(
+                "UPDATE deliveries SET sent = 1 WHERE message_key = ?", (self._key(incoming),)
+            )
 
     @staticmethod
     def _key(incoming: IncomingMessage) -> str:
-        return incoming.session_id + ":" + incoming.message_id
+        return f"{incoming.session_id}:{incoming.message_id}"
 
     def __enter__(self) -> Self:
         return self

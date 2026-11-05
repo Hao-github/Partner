@@ -1,18 +1,23 @@
-﻿# GPTPartner 交接文档
+# GPTPartner 交接文档
 
 更新：2026-11-06，Asia/Shanghai。下一次对话先读本文件和项目 AGENTS.md。
 
 ## 当前状态
 
-项目：`C:\Users\HUAWEI\Desktop\program\GPTPartner`。QQ 官方机器人「莫念」的本人私聊此前已经完成真实收发与模型工具调用，支持对话内模型切换。本轮将运行入口统一为 Agent，收拢渠道和模型接口，并按供应商拆分协议实现。验证使用 mock 模型、临时数据库；当前没有常驻机器人进程。
+项目：`C:\Users\HUAWEI\Desktop\program\GPTPartner`。QQ 官方机器人「莫念」的本人私聊此前已经完成真实收发与模型工具调用，支持对话内模型切换。运行入口已统一为 Agent，渠道和模型实现收为内部模块。本轮完成码风精简和接入扩展边界：以后新增模型供应商或渠道，只新增实现和工厂选择分支，主循环不维护具体名单。验证使用 mock 模型、临时数据库；当前没有常驻机器人进程。
 
 本轮用户要求均已实现：
 
-- 用户确认对外入口统一叫 Agent：`from ai_butler import Agent`，删除 Butler 及 app.py，不保留兼容包装。
-- Agent 负责主循环、模型命令、按模型复用 Provider 和工具执行，渠道及供应商由其内部工厂创建。
-- providers、channels 不再导出实现类或公共工厂；实现移入下划线模块。解析函数、状态码映射收为供应商类的私有方法。
-- 删除 ChatCompletionsProvider 中间层；OpenAI、DeepSeek 各自维护接口、认证、请求格式、响应解析及错误文案，Provider 基类只共用 HTTP/JSON 传输与重试。
-- 继续使用此前合并的 7 个测试模块，当前 80 项测试通过；更新 README 和本交接文档，保存为独立本地 Git 迭代，不推送远端。
+- 启动时由工厂创建默认 Provider，将其已解析配置和实例直接交给 Agent 缓存；后续模型选择仍按需创建并复用。
+- 工具轮次使用有界循环，供应商解析用赋值表达式读取工具调用，路径归一化复用 pathlib 的绝对路径语义。
+- QQ 登录完成后用 login_deadline=None 表示取消登录期限，去掉重复的 logged_in 标记；协议事件与 opcode 使用 match 分派，保留必要的心跳、会话及关闭状态。
+- 动态日志、URL、会话键和提示等统一优先 f-string，日志布局使用花括号模板；SQL 参数继续绑定。
+- README 明确门面、策略/适配器、简单工厂、模板方法和事务封装各自的位置与扩展方式；工作约定同步到 AGENTS.md。
+- 默认模型和地址归各 Provider 子类，通过 `_provider_type` 选择实现；Config 按名称读取 `NAME_API_KEY`、`NAME_MODEL`、`NAME_BASE_URL`，不枚举供应商。环境快照不参与 repr，新增渠道直接从 options 字典读取专属配置，在构造边界用 int / float 转换并校验。
+- 删除 Config 的 option、integer、number、with_options 和渠道诊断的纯转发函数。直接使用字典及 dataclasses.replace；保留承担协议、校验、生命周期和共享业务规则的接口，不按行数拆函数。
+- 渠道类型统一由 `_channel_type` 选择；诊断走 Channel.inspect 钩子。CLI 不枚举供应商和渠道，诊断参数统一为 `--check`、`--discover`，移除原先 QQ 专属参数名。
+- 模型和 QQ HTTP 尝试次数均用 `range(max_retries + 1)`；工具循环用 `range(max_tool_rounds + 1)`。不再使用 itertools.count；网关常驻循环由关闭事件控制。
+- 继续使用 7 个测试模块，当前 84 项测试通过；更新文档并保存为独立本地 Git 迭代，不推送远端。
 
 ## 环境与约定
 
@@ -28,6 +33,9 @@ python -m pyright
 ```
 
 - 用户偏好简洁、短函数、dataclass、早返回、显式继承、直接导入；只有一个人使用和部署，不要增加多余的动态加载、兼容包装或通用基础设施。
+- 直接使用 Python 字典、类型转换和 dataclasses.replace；不要为这些标准能力添加薄封装。短函数应有实际职责，避免为设计模式增加无意义的层次。
+- 动态文本优先 f-string，包含日志；日志布局使用 `{}` 模板，SQL 继续用参数绑定。短路、赋值表达式和模式匹配用于简化流程，保留真实状态初始化。
+- 新供应商/平台只修改对应实现和工厂的类型选择分支，不修改 Agent、CLI 路由或会话存储。凭据及专属配置通过 Config 的通用环境快照读取，业务模块不读取 os.environ 或 .env。
 - 不通过忽略注释或关闭诊断消除编辑器警告。Pyright 已设置 `reportDeprecated = "error"`。
 - `.env` 只由 `config.py` 读取，通过共享 Config 实例使用；不在业务模块重复解析。
 - 真实凭据与 QQ 允许名单已在本机 `.env`。不要输出、提交或再次索要密钥，不输出真实会话内容。
@@ -117,13 +125,16 @@ GPTPartner/
 ```
 
 - 数据类集中在 models；Config 仍在 config.py，保持配置读取集中。Agent、渠道等行为类保留在对应业务模块，不把全部类堆到一个目录。
-- 对外仅使用 Agent 的 `run()`、`close()` 和静态诊断入口 `inspect(channel="qq", discover=False, settings=config)`。不再直接组合渠道与 Provider，也不再提供公开的单轮 reply 方法。
+- 对外仅使用 Agent 的 `run()`、`close()` 和静态诊断入口 `inspect(channel, discover=False, settings=config)`。不再直接组合渠道与 Provider，也不再提供公开的单轮 reply 方法。
 - 内部 CLIChannel 和 QQChannel 显式继承 Channel，共用 receive、reply、history、close；平台实现 `_receive`、`_send`、可选 `_close` 和错误文案钩子。
 - 内部回调为 `(incoming, history) -> Reply`。IncomingMessage.model 携带已保存的会话选择；Reply.model 非空表示本次更新选择，None 表示保留。Reply.messages 为完整成功轮次；空列表只发送文本。
 - Channel 基类集中打开和关闭一个当前线程内的 SQLite 连接，并统一存储错误。CLI、QQ、Agent 不直接创建 SessionStore。
 - Agent 按 ModelSelection 复用 Provider，在 `_complete_turn` 中执行模型与工具循环；会话状态仍由渠道存储提供，Agent 不持有会话历史。
 - Provider 仅共用 HTTP/JSON 传输与有限重试，不理解供应商消息协议；两家供应商分别在 `_openai.py`、`_deepseek.py` 组装请求并通过私有 `_parse_message`、`_status_message` 处理响应。OpenAI 使用 max_completion_tokens，DeepSeek 使用 max_tokens 并关闭 thinking。
 - 下划线模块和空的子包导出列表标明内部实现边界，不通过调用栈检查、访问令牌等机制阻止 Python 导入。测试允许直接验证内部实现，应用代码只通过 Agent 运行。
+- 现有架构使用 Agent 门面、Provider 策略/适配器、内部简单工厂、Channel 模板方法及 SessionStore 事务封装。新供应商维护配置、独立实现和工厂选择；新渠道实现已有生命周期钩子，继续通过统一消息接入。
+- 新 Provider 声明 default_model、default_base_url，并在 `_provider_type` 增加 case。工厂用供应商名称前缀读取 Key、模型和地址，校验后创建实例；Config.select_model 仅清除跨供应商的旧选择，具体默认值到工厂再补齐。Config 原来的 deepseek_api_key、openai_api_key 字段已改为通用 options 快照及 api_key 属性；测试用 dataclasses.replace 和字典合并创建副本，原有 .env Key 名称保持不变。
+- 新 Channel 构造器接收 Config，实现 `_receive(handler)`、`_send(incoming, text)`，按需实现 `_close()`、inspect，再在 `_channel_type` 增加 case。平台需提供独立的 session_id / message_id 命名空间，接入 HTTP、WebSocket、轮询等细节留在实现内。当前统一协议覆盖文本和工具调用，新媒体能力需另行扩展消息协议。
 - 保留 turns、deliveries 的原表与消息键，新增 session_models；不需要清空旧库。轮次、模型选择和回复缓存同一事务保存，写入失败全部回滚。
 - 网络发送与数据库发送状态仍是两个步骤；QQ 使用原 msg_id、固定 msg_seq=1 和平台重复码处理重试，不宣称严格恰好一次交付。
 - 删除过设计的 network 层、自定义 opener 和 NoRedirect；HTTP 实现直接使用标准库 urlopen。
@@ -135,8 +146,8 @@ GPTPartner/
 - 官方机器人 WebSocket 单聊，只处理允许名单内的普通文本 C2C 消息。
 - 会话键：`qq:<appid>:c2c:<openid>`；CLI 沿用 `live:<session>`。
 - 单工作线程串行处理消息，网关心跳独立；默认容量 16、每用户发送间隔 3 秒、回复本地上限 1800 字符。
-- `python main.py --channel qq --qq-check` 只检查凭据与网关。
-- `python main.py --channel qq --qq-discover` 只在用户明确启动时显示发送者 OpenID，不调用模型或回复。
+- `python main.py --channel qq --check` 只检查凭据与网关。
+- `python main.py --channel qq --discover` 只在用户明确启动时显示发送者 OpenID，不调用模型或回复。
 - 目前没有群聊、图片、语音、Webhook、微信、长期事实记忆、定时任务或 MCP 客户端，也没有部署常驻服务。
 
 ## 云端常驻规划（尚未部署）
@@ -165,8 +176,8 @@ GPTPartner/
 
 共享数据、临时数据库、网络禁止保护及 `RecordingChannel` 放在 `tests/helpers.py`。新增测试优先放入对应模块和 TestCase；出现独立职责或模块过大时再拆分。单组运行示例：`python -m unittest tests.test_app.ModelSwitchTests -v`。
 
-本轮：80 项单元与流程测试通过，Ruff check / format check 通过，Pyright 0 errors / 0 warnings。在既有会话隔离、模型切换、重启恢复、旧 QQ 命令重推和事务回滚等覆盖上，新增公开 Agent 主循环运行工具并保存完整轮次、两家供应商保留无文本工具调用、DeepSeek 中止生成的验证。解析测试通过供应商 complete 的模拟 HTTP 路径运行，不再从 Agent 测试导入供应商解析函数。测试不调用真实模型或发送 QQ 消息。
+本轮：84 项单元与流程测试通过，Ruff check / format check 通过，Pyright 0 errors / 0 warnings。继续覆盖会话隔离、模型切换、重启恢复、旧 QQ 命令重推、事务回滚、公开 Agent 工具调用、供应商解析和重试。新增：QQ 已登录连接超过初始登录期限继续运行、Config 新凭据的隐藏和快照、第三种 Provider + Channel 只扩展工厂分支即可完成 CLI 启动/模型切换/落库/关闭、通用诊断不创建模型。重试覆盖 0/1/2 次额外重试，工具测试覆盖耗尽工具轮次后的最终回答。第三种协议仅为测试替身，不是 Grok/Gemini 或新平台的真实接入。
 
-Git 仓库实际根目录已是 `C:\Users\HUAWEI\Desktop\program\GPTPartner`，当前分支为 `master`；旧文档中关于使用父目录仓库的说明已经失效。历史基线为 `27a6ae4`，测试整理为 `f56468b`，`.vscode/` 取消跟踪及云端规划为 `f154d8f`。本轮接口收拢及供应商拆分另作独立提交。真实 .env、数据库、缓存和构建产物均通过项目 .gitignore 排除。
+Git 仓库实际根目录已是 `C:\Users\HUAWEI\Desktop\program\GPTPartner`，当前分支为 `master`；旧文档中关于使用父目录仓库的说明已经失效。历史基线为 `27a6ae4`，测试整理为 `f56468b`，`.vscode/` 取消跟踪及云端规划为 `f154d8f`，Agent 接口收拢及供应商拆分为 `dbb2c99`。本轮码风、计数器和接入扩展边界另作独立提交。真实 .env、数据库、缓存和构建产物均通过项目 .gitignore 排除。
 
 本交接文档与实现一起提交。本地提交标识请在项目目录执行 `git log -5 --oneline` 查看；后续按独立改动提交到此仓库，不推送远端。

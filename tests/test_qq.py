@@ -39,9 +39,7 @@ class QQStartupTests(ProjectTest):
 
     @patch("ai_butler.channels.qq._channel._QQClient")
     def test_check_does_not_require_model_key_or_send_messages(self, client):
-        settings = replace(
-            self.settings, qq_app_id="123", qq_app_secret="secret", deepseek_api_key=""
-        )
+        settings = replace(self.settings, options={}, qq_app_id="123", qq_app_secret="secret")
         with redirect_stdout(StringIO()):
             Agent.inspect("qq", settings=settings)
         client.return_value.gateway_url.assert_called_once()
@@ -50,9 +48,7 @@ class QQStartupTests(ProjectTest):
     @patch("ai_butler.channels.qq._channel._QQGateway")
     @patch("ai_butler.channels.qq._channel._QQClient")
     def test_discovery_does_not_require_model_key(self, client, gateway):
-        settings = replace(
-            self.settings, qq_app_id="123", qq_app_secret="secret", deepseek_api_key=""
-        )
+        settings = replace(self.settings, options={}, qq_app_id="123", qq_app_secret="secret")
         with redirect_stdout(StringIO()):
             Agent.inspect("qq", discover=True, settings=settings)
         gateway.return_value.run.assert_called_once()
@@ -303,12 +299,14 @@ class QQClientTests(ProjectTest):
 
     @patch("ai_butler.channels.qq._client.time.sleep")
     def test_network_retries_are_bounded(self, sleep):
-        client = self.client(max_retries=1)
-        self.open.side_effect = TimeoutError("secret")
-        with self.assertRaises(RuntimeError) as error:
-            client.access_token()
-        self.assertEqual(self.open.call_count, 2)
-        self.assertNotIn("secret", str(error.exception))
+        for retries in (0, 1, 2):
+            with self.subTest(retries=retries):
+                client = self.client(max_retries=retries)
+                self.open.side_effect = TimeoutError("secret")
+                with self.assertRaises(RuntimeError) as error:
+                    client.access_token()
+                self.assertEqual(self.open.call_count, retries + 1)
+                self.assertNotIn("secret", str(error.exception))
 
     def test_insecure_gateway_is_rejected(self):
         client = self.client()
@@ -386,6 +384,32 @@ class QQGatewayTests(ProjectTest):
         self.assertEqual(
             [json.loads(call.args[0])["op"] for call in socket.send.call_args_list], [2, 1]
         )
+
+    def test_logged_in_connection_outlives_login_deadline(self):
+        gateway = self.gateway()
+        self.client.config = replace(self.settings, timeout=1)
+        clock = Mock(return_value=0.0)
+
+        def advance_clock(data):
+            clock.return_value = 2.0
+
+        self.on_message.side_effect = advance_clock
+        socket = Mock()
+        socket.recv.side_effect = [
+            json.dumps({"op": 10, "d": {"heartbeat_interval": 45000}}),
+            json.dumps({"op": 0, "s": 4, "t": "READY", "d": {"session_id": "session"}}),
+            json.dumps({"op": 0, "s": 5, "t": "C2C_MESSAGE_CREATE", "d": {"id": "message"}}),
+            json.dumps({"op": 1}),
+            KeyboardInterrupt(),
+        ]
+        with (
+            patch("ai_butler.channels.qq._gateway.time.monotonic", clock),
+            redirect_stdout(StringIO()),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            gateway.serve(socket)
+        self.on_message.assert_called_once_with({"id": "message"})
+        self.assertEqual(json.loads(socket.send.call_args.args[0]), {"op": 1, "d": 5})
 
     def test_invalid_resume_resets_session(self):
         gateway = self.gateway()

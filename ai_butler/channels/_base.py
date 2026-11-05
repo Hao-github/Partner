@@ -26,6 +26,11 @@ class Channel(ABC):
         self._settings = settings
         self._stopping = Event()
 
+    @classmethod
+    def inspect(cls, *, discover: bool = False, settings: Config = config) -> None:
+        """平台按需实现诊断；不实例化渠道或模型。"""
+        raise ValueError(f"{cls.__name__} 不支持渠道诊断或发送者识别。")
+
     def receive(self, handler: MessageHandler) -> None:
         """阻塞接收统一消息，调用业务回调并自动回复。"""
         if not self._stopping.is_set():
@@ -36,7 +41,7 @@ class Channel(ABC):
         if not self._stopping.is_set():
             self._send(incoming, text)
             if not self._stopping.is_set():
-                logger.info("reply_sent channel=%s", incoming.channel)
+                logger.info(f"reply_sent channel={incoming.channel}")
 
     def history(self, session_id: str) -> list[Message]:
         """读取渠道会话的最近完整轮次，不暴露数据库连接。"""
@@ -54,23 +59,23 @@ class Channel(ABC):
         with self._store() as store:
             cached = store.get_delivery(incoming)
             if cached and cached.sent:
-                logger.info("reply_skipped channel=%s reason=already_sent", incoming.channel)
+                logger.info(f"reply_skipped channel={incoming.channel} reason=already_sent")
                 return
             if cached:
-                logger.info("reply_reused channel=%s", incoming.channel)
+                logger.info(f"reply_reused channel={incoming.channel}")
                 text = cached.reply
             else:
-                logger.info("message_received channel=%s", incoming.channel)
+                logger.info(f"message_received channel={incoming.channel}")
                 incoming = replace(incoming, model=store.get_model(incoming.session_id))
                 history = store.load(incoming.session_id, self._settings.history_turns)
                 try:
                     result = handler(incoming, history)
                 except RuntimeError as error:
-                    logger.warning("handler_failed channel=%s", incoming.channel)
+                    logger.warning(f"handler_failed channel={incoming.channel}")
                     result = Reply(self._failure_reply(error))
                 store.save(incoming, result)
                 text = result.text
-                logger.info("reply_saved channel=%s", incoming.channel)
+                logger.info(f"reply_saved channel={incoming.channel}")
             self.reply(incoming, text)
             if not self._stopping.is_set():
                 store.mark_sent(incoming)

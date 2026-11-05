@@ -33,7 +33,7 @@ class AgentTests(ProjectTest):
             tool_message("one", "two"),
             {"role": "assistant", "content": "当前北京时间。"},
         ]
-        result = self.create_agent(provider)._respond(
+        result = self.create_agent(provider, max_tool_rounds=1)._respond(
             IncomingMessage("test", "user", "a", "几点了"), []
         )
         messages = provider.complete.call_args.args[0]

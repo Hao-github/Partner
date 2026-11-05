@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from ai_butler.config import Config, config
 from ai_butler.core import agent as agent_module
+from ai_butler.providers import _create_provider
 from ai_butler.providers._deepseek import DeepSeekProvider
 from tests.helpers import ProjectTest
 
@@ -28,7 +29,7 @@ class ConfigTests(ProjectTest):
             clear=True,
         ):
             settings = Config()
-        settings.validate()
+        settings = _create_provider(settings).config
         self.assertEqual(settings.api_key, "test-key")
         self.assertEqual(settings.base_url, "https://api.openai.com/v1")
         self.assertEqual(settings.timeout, 12.5)
@@ -50,6 +51,7 @@ class ConfigTests(ProjectTest):
         shutil.copyfile(source, package / "config.py")
         (self.root / ".env").write_text(
             'BUTLER_PROVIDER=openai\nBUTLER_MODEL="file-model"\nOPENAI_API_KEY=test-file-key\n'
+            "BUTLER_BASE_URL=https://test.invalid\n"
             "BUTLER_TIMEOUT_SECONDS=9.5\nBUTLER_DB_PATH=data/test.sqlite3\n",
             encoding="utf-8-sig",
         )
@@ -90,18 +92,20 @@ class ConfigTests(ProjectTest):
 
     def test_missing_key_has_clear_message(self):
         with self.assertRaisesRegex(ValueError, "DEEPSEEK_API_KEY"):
-            replace(self.settings, deepseek_api_key="").validate()
+            replace(self.settings, options={}).validate()
 
     def test_select_model_resets_other_provider_defaults_and_preserves_source(self):
         selected = self.settings.select_model(provider=" OpenAI ", model="test-model")
         self.assertEqual(selected.provider, "openai")
-        self.assertEqual(selected.base_url, "https://api.openai.com/v1")
+        self.assertEqual(selected.base_url, "")
         self.assertEqual(selected.model, "test-model")
         self.assertEqual(self.settings.provider, "deepseek")
         self.assertEqual(self.settings.base_url, "https://api.deepseek.com")
         deepseek = selected.select_model(provider="deepseek")
-        self.assertEqual(deepseek.model, "deepseek-flash")
-        self.assertEqual(deepseek.base_url, "https://api.deepseek.com")
+        self.assertEqual((deepseek.model, deepseek.base_url), ("", ""))
+        resolved = _create_provider(deepseek).config
+        self.assertEqual(resolved.model, "deepseek-flash")
+        self.assertEqual(resolved.base_url, "https://api.deepseek.com")
 
     def test_select_model_keeps_same_provider_custom_endpoint(self):
         settings = replace(self.settings, base_url="https://test.invalid")
@@ -111,7 +115,11 @@ class ConfigTests(ProjectTest):
 
     def test_openai_model_is_explicit(self):
         with self.assertRaisesRegex(ValueError, "BUTLER_MODEL"):
-            replace(self.settings, provider="openai", model="", openai_api_key="test").validate()
+            _create_provider(
+                replace(
+                    self.settings, provider="openai", model="", options={"OPENAI_API_KEY": "test"}
+                )
+            )
 
     def test_invalid_provider_and_runtime_limits_are_rejected(self):
         for changes in (
@@ -122,10 +130,21 @@ class ConfigTests(ProjectTest):
             {"history_turns": 0},
             {"max_tool_rounds": 0},
             {"base_url": "http://example.com"},
-            {"deepseek_api_key": "test\nheader"},
+            {"options": {"DEEPSEEK_API_KEY": "test\nheader"}},
         ):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
-                replace(self.settings, **changes).validate()
+                _create_provider(replace(self.settings, **changes))
+
+    def test_options_snapshot_hides_credentials_and_copies_are_independent(self):
+        with patch.dict(os.environ, {"FUTURE_API_KEY": "private-key", "FUTURE_LIMIT": "7"}):
+            settings = Config(provider="future")
+            os.environ["FUTURE_LIMIT"] = "8"
+        self.assertEqual(settings.api_key, "private-key")
+        self.assertEqual(settings.options["FUTURE_LIMIT"], "7")
+        self.assertNotIn("private-key", repr(settings))
+        changed = replace(settings, options=settings.options | {"FUTURE_LIMIT": "9"})
+        self.assertEqual(changed.options["FUTURE_LIMIT"], "9")
+        self.assertEqual(settings.options["FUTURE_LIMIT"], "7")
 
     def test_secret_is_hidden_from_config_repr(self):
         settings = replace(self.settings, qq_app_secret="private-secret")

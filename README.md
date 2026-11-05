@@ -101,6 +101,28 @@ GPTPartner/
 - QQ 目录已实现官方机器人 WebSocket 单聊；微信仍预留。渠道不导入 Agent 或模型实现，平台收发协议放在各自渠道目录中。
 - HTTP 请求直接在各自实现中使用标准库 `urllib.request.urlopen`，不再单独封装 network 层。
 
+## 架构与扩展约定
+
+| 模式 | 对应实现 | 扩展边界 |
+| --- | --- | --- |
+| 门面 | `Agent` | 应用只选择配置并调用 run、close、inspect |
+| 策略与适配器 | `Provider` 子类、具体渠道 | 各自维护供应商或平台协议，通过统一消息交互 |
+| 简单工厂 | `_provider_type`、`_channel_type` 和创建入口 | 类型选择集中在 match 分支，统一应用配置 |
+| 模板方法 | `Channel._process` 及收发、关闭钩子 | 公共流程管理历史、去重和保存，平台实现收发与资源清理 |
+| 存储封装与事务 | `SessionStore` | 同一事务保存轮次、模型选择和回复缓存 |
+
+新增供应商时，在独立模块实现 Provider 的 complete、响应归一化和错误提示，并在子类声明 default_model、default_base_url；最后只在 `_provider_type` 添加一个 case。Key 按 `{供应商名大写}_API_KEY` 读取，模型和地址还可通过同前缀的 `_MODEL`、`_BASE_URL` 覆盖。默认值和供应商名单都不写进 Agent 或 Config。
+
+新增渠道时，子类构造器接收 Config，实现 `_receive(handler)`、`_send(incoming, text)`；按需实现 `_close()` 和类方法 inspect，再在 `_channel_type` 添加一个 case。消息必须转为 IncomingMessage，并生成渠道独立的用户、会话和消息键。新渠道配置直接从 `settings.options` 字典取值，需要时用 int、float 转换，校验留在渠道构造边界。
+
+CLI 的供应商和渠道名称直接交给工厂选择，诊断统一使用 `--check`、`--discover`。Agent、模型与工具循环、会话存储均不区分具体供应商和平台。QQ 网关在自己的模块中用状态变量及 match 分派协议事件。当前统一协议覆盖文本与工具调用；新增媒体能力时需另外扩展消息协议。
+
+测试中加入了第三种 Provider 和 Channel，只替换两处类型选择分支，完整验证 CLI 启动、供应商专属配置、模型切换、历史保存和渠道关闭；通用诊断也验证不会创建模型。测试替身只存在于 tests。
+
+动态文本统一优先使用 f-string，日志布局使用花括号模板；SQL 数据使用参数绑定。短路用于默认值与条件，赋值表达式用于一次读取后立即判断；保留会话、心跳、缓存和关闭流程所需的状态。代码使用 Ruff 统一格式，Pyright 检查类型。
+
+优先直接使用字典和标准库，不为取值、类型转换或单纯转发再增加方法。保留承担协议适配、校验、资源管理和共享业务规则的接口。
+
 ## 安装与启动
 
 本机已经创建 Conda 环境 `gptpartner`。每次运行、测试或安装前先激活：
@@ -133,15 +155,16 @@ print(config.model)
 print(config.history_turns)
 ```
 
-模块加载时，`python-dotenv` 从项目 `.env` 读取变量；dataclass `Config()` 将其转换为类型明确的配置，并生成共享实例 `config`。环境变量优先于 `.env`。修改 `.env` 后重启程序生效，不会在每条消息中重复读取文件。
+模块加载时，`python-dotenv` 从项目 `.env` 读取变量；dataclass `Config()` 保存环境快照及公共配置，生成共享实例 `config`。供应商工厂应用所选子类的默认模型和地址后校验。环境变量优先于 `.env`。修改 `.env` 后重启程序生效，不会在每条消息中重复读取文件。
 
-业务代码直接使用共享实例；测试可传入单独的 `Config(...)`，以隔离模型配置和临时数据库。`config.validate()` 在启动时检查必要配置。暂不自定义异常层级：配置问题使用 `ValueError`，模型与工具循环失败使用 `RuntimeError`。
+业务代码使用共享实例；测试可传入单独的 `Config(...)`，以隔离模型配置和临时数据库。修改副本直接使用 `dataclasses.replace`，例如 `replace(settings, options=settings.options | {"OPENAI_API_KEY": "test-key"})`。`Config.model`、base_url 在未显式配置时可为空，由工厂填入供应商默认值。暂不自定义异常层级：配置问题使用 `ValueError`，模型与工具循环失败使用 `RuntimeError`。
 
 | 变量 | 默认 / 用途 |
 | --- | --- |
 | `BUTLER_PROVIDER` | `deepseek` 或 `openai` |
 | `BUTLER_MODEL` | DeepSeek 默认 `deepseek-flash`；OpenAI 显式指定 |
 | `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` | 对应模型服务凭据 |
+| `{PROVIDER}_API_KEY` / `_MODEL` / `_BASE_URL` | 新供应商按名称前缀读取选项；后两项覆盖该供应商默认值 |
 | `BUTLER_BASE_URL` | 未设置时自动选择对应服务根地址 |
 | `BUTLER_DB_PATH` | `data/sessions.sqlite3`，相对项目根目录 |
 | `BUTLER_TIMEOUT_SECONDS` | 单次请求 30 秒 |
@@ -151,6 +174,8 @@ print(config.history_turns)
 | `BUTLER_MAX_TOOL_ROUNDS` | 最多 3 轮工具执行 |
 
 Key 不参与 dataclass 的 repr；日志不输出密钥、请求正文或完整对话。`.env` 和会话数据库已在 `.gitignore` 中排除。
+
+HTTP 的重试循环使用 `range(max_retries + 1)`，包含首次请求；工具循环使用 `range(max_tool_rounds + 1)`，包含工具执行后的最终回答机会。网关持续接收与重连使用受关闭事件控制的 while 循环。
 
 ## 会话与内部消息
 
@@ -218,8 +243,8 @@ python -W error::DeprecationWarning -W error::PendingDeprecationWarning -m unitt
 QQ 私聊接入已实现。先在激活的环境中执行 `python -m pip install -e ".[dev]"`，在本机 `.env` 配置 QQ 凭据，再依次运行：
 
 ```powershell
-python main.py --channel qq --qq-check
-python main.py --channel qq --qq-discover
+python main.py --channel qq --check
+python main.py --channel qq --discover
 # 收到自己的 OpenID 后，Ctrl+C 退出，填写 .env 的 QQ_ALLOWED_USERS。
 python main.py --channel qq
 ```

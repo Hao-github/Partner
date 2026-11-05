@@ -3,7 +3,7 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from http.client import HTTPException
-from typing import Any
+from typing import Any, ClassVar
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 
 class Provider(ABC):
     """内部模型端口；共用 HTTP 传输，具体协议由各供应商实现。"""
+
+    default_model: ClassVar[str] = ""
+    default_base_url: ClassVar[str] = ""
 
     def __init__(self, settings: Config = config):
         self.config = settings
@@ -32,39 +35,34 @@ class Provider(ABC):
         """只负责 HTTP、JSON 解码和有限重试，不理解模型消息格式。"""
         config = self.config
         started = time.monotonic()
-        logger.debug("model_request_started provider=%s", config.provider)
-        attempt = 0
-        while True:
+        logger.debug(f"model_request_started provider={config.provider}")
+        for attempt in range(config.max_retries + 1):
             try:
                 with urlopen(request, timeout=config.timeout) as response:
                     payload = json.loads(response.read())
                 logger.info(
-                    "model_http_completed provider=%s duration_ms=%d",
-                    config.provider,
-                    (time.monotonic() - started) * 1000,
+                    f"model_http_completed provider={config.provider} "
+                    f"duration_ms={int((time.monotonic() - started) * 1000)}"
                 )
                 return payload
             except HTTPError as error:
                 status = error.code
                 error.close()
                 if (status != 429 and not 500 <= status <= 599) or attempt == config.max_retries:
-                    logger.error(
-                        "model_request_failed provider=%s status=%d", config.provider, status
-                    )
+                    logger.error(f"model_request_failed provider={config.provider} status={status}")
                     raise RuntimeError(self._status_message(status)) from None
                 reason = f"HTTP {status}"
             except (OSError, HTTPException):
                 if attempt == config.max_retries:
-                    logger.error("model_request_failed provider=%s reason=network", config.provider)
+                    logger.error(f"model_request_failed provider={config.provider} reason=network")
                     raise RuntimeError(
                         "连接模型服务失败或超时，请检查网络与 API 地址后重试。"
                     ) from None
                 reason = "network_or_timeout"
             except (json.JSONDecodeError, UnicodeDecodeError):
-                logger.error("model_request_failed provider=%s reason=json", config.provider)
+                logger.error(f"model_request_failed provider={config.provider} reason=json")
                 raise RuntimeError("模型服务未返回有效 JSON，请检查 API 根地址。") from None
             logger.warning(
-                "model_retry provider=%s attempt=%d reason=%s", config.provider, attempt + 1, reason
+                f"model_retry provider={config.provider} attempt={attempt + 1} reason={reason}"
             )
             time.sleep(min(2**attempt, 8))
-            attempt += 1

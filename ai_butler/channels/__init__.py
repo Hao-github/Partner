@@ -8,16 +8,16 @@ from .qq._channel import QQChannel as _QQChannel
 __all__: list[str] = []
 
 
-def _create_channel(name: str, *, session: str = "default", settings: Config = config) -> _Channel:
-    if name == "cli":
-        return _CLIChannel(session, settings)
-    if name == "qq":
-        return _QQChannel(settings)
+def _channel_type(name: str) -> type[_Channel]:
+    match name:
+        case "cli":
+            return _CLIChannel
+        case "qq":
+            return _QQChannel
     raise ValueError(f"不支持的渠道：{name}")
 
 
-def _inspect_channel(name: str, *, discover: bool = False, settings: Config = config) -> None:
-    """检查渠道连接或识别发送者，不调用模型。"""
-    if name != "qq":
-        raise ValueError("只有 QQ 渠道支持连接检查和发送者识别。")
-    _QQChannel.inspect(discover=discover, settings=settings)
+def _create_channel(name: str, *, session: str = "default", settings: Config = config) -> _Channel:
+    if name == "cli":
+        return _CLIChannel(session, settings)
+    return _channel_type(name)(settings)

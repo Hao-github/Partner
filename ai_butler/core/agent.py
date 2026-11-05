@@ -1,6 +1,6 @@
 import logging
 
-from ..channels import _create_channel, _inspect_channel
+from ..channels import _channel_type, _create_channel
 from ..config import Config, config
 from ..models import IncomingMessage, Message, ModelSelection, Reply
 from ..providers import _create_provider
@@ -32,25 +32,23 @@ class Agent:
         session: str = "default",
         settings: Config = config,
     ):
-        self._settings = settings.select_model(provider=provider, model=model)
+        default_provider = _create_provider(settings.select_model(provider=provider, model=model))
+        self._settings = default_provider.config
         self._default_model = ModelSelection(self._settings.provider, self._settings.model)
-        self._providers: dict[ModelSelection, _Provider] = {}
-        self._provider(self._default_model)
+        self._providers = {self._default_model: default_provider}
         self._channel = _create_channel(channel, session=session, settings=self._settings)
         self._channel_name = channel
 
     @staticmethod
-    def inspect(channel: str = "qq", *, discover: bool = False, settings: Config = config) -> None:
+    def inspect(channel: str, *, discover: bool = False, settings: Config = config) -> None:
         """显式检查渠道或识别发送者，不创建模型、不接收普通对话。"""
-        _inspect_channel(channel, discover=discover, settings=settings)
+        _channel_type(channel).inspect(discover=discover, settings=settings)
 
     def run(self) -> None:
         """运行接收、推理、保存和回复主循环，退出时关闭渠道。"""
         logger.info(
-            "app_started channel=%s provider=%s model=%s",
-            self._channel_name,
-            self._settings.provider,
-            self._settings.model,
+            f"app_started channel={self._channel_name} "
+            f"provider={self._settings.provider} model={self._settings.model}"
         )
         try:
             self._channel.receive(self._respond)
@@ -60,15 +58,14 @@ class Agent:
     def close(self) -> None:
         """停止接收并释放渠道资源；可重复调用。"""
         self._channel.close()
-        logger.info("app_stopped channel=%s", self._channel_name)
+        logger.info(f"app_stopped channel={self._channel_name}")
 
     def _provider(self, selection: ModelSelection) -> _Provider:
         """按模型复用内部客户端，配置验证成功后才加入缓存。"""
         if selection not in self._providers:
-            settings = self._settings.select_model(
-                provider=selection.provider, model=selection.model
+            self._providers[selection] = _create_provider(
+                self._settings.select_model(provider=selection.provider, model=selection.model)
             )
-            self._providers[selection] = _create_provider(settings)
         return self._providers[selection]
 
     def _respond(self, incoming: IncomingMessage, history: list[Message]) -> Reply:
@@ -88,17 +85,14 @@ class Agent:
         """内部模型与工具循环；返回完整成功轮次，不修改传入历史。"""
         turn: list[Message] = [{"role": "user", "content": incoming.text}]
         context: list[Message] = [{"role": "system", "content": _SYSTEM_PROMPT}, *history]
-        tool_rounds = 0
-        while True:
+        for tool_rounds in range(self._settings.max_tool_rounds + 1):
             message = provider.complete(context + turn, TOOL_SCHEMAS)
-            calls = message.get("tool_calls", [])
-            if calls and tool_rounds >= self._settings.max_tool_rounds:
-                raise RuntimeError("工具调用次数已达上限，请换一种方式提问。此轮未保存。")
             turn.append(message)
-            if not calls:
+            if not (calls := message.get("tool_calls")):
                 return Reply(message["content"], turn)
-            tool_rounds += 1
-            logger.info("tools_requested round=%d count=%d", tool_rounds, len(calls))
+            if tool_rounds == self._settings.max_tool_rounds:
+                break
+            logger.info(f"tools_requested round={tool_rounds + 1} count={len(calls)}")
             for call in calls:
                 function = call["function"]
                 turn.append(
@@ -108,6 +102,7 @@ class Agent:
                         "content": execute_tool(function["name"], function["arguments"]),
                     }
                 )
+        raise RuntimeError("工具调用次数已达上限，请换一种方式提问。此轮未保存。")
 
     def _model_command(self, args: list[str], current: ModelSelection) -> Reply:
         """模型命令不发起请求；选择由渠道与回复一起提交。"""
@@ -125,5 +120,5 @@ class Agent:
             self._provider(selected)
         except ValueError as error:
             return Reply(f"模型切换失败：{error}")
-        logger.info("model_selected provider=%s model=%s", selected.provider, selected.model)
+        logger.info(f"model_selected provider={selected.provider} model={selected.model}")
         return Reply(f"已切换模型：{selected.provider} / {selected.model}", model=selected)

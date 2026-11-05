@@ -27,7 +27,8 @@ class ProviderTests(ProjectTest):
         self.assertIsInstance(_create_provider(self.settings), DeepSeekProvider)
         settings = self.settings.select_model(provider="openai", model="test-model")
         self.assertIsInstance(
-            _create_provider(replace(settings, openai_api_key="test-key")), OpenAIProvider
+            _create_provider(replace(settings, options={"OPENAI_API_KEY": "test-key"})),
+            OpenAIProvider,
         )
         with self.assertRaisesRegex(ValueError, "BUTLER_PROVIDER"):
             _create_provider(replace(self.settings, provider="unknown"))
@@ -41,7 +42,7 @@ class ProviderTests(ProjectTest):
                 client = self.client(
                     provider=name,
                     model="test-model",
-                    openai_api_key="test-secret",
+                    options={"DEEPSEEK_API_KEY": "test-secret", "OPENAI_API_KEY": "test-secret"},
                     base_url="https://test.invalid",
                 )
                 self.open.return_value = self.response()
@@ -87,7 +88,7 @@ class ProviderTests(ProjectTest):
             client.complete([], [TIME_TOOL])
         self.assertEqual(self.open.call_count, 3)
         self.assertEqual(sleep.call_count, 2)
-        self.assertNotIn("private-key", str(error.exception) + str(logs.output))
+        self.assertNotIn("private-key", f"{error.exception}{logs.output}")
 
     def test_non_retryable_http_errors_fail_once(self):
         for name in ("deepseek", "openai"):
@@ -110,6 +111,7 @@ class ProviderTests(ProjectTest):
                 self.open.side_effect = failure
                 with self.assertRaises(RuntimeError) as error:
                     client.complete([], [TIME_TOOL])
+                self.assertEqual(self.open.call_count, 1)
                 self.assertNotIn("private", str(error.exception))
         client = self.client()
         self.open.return_value = BytesIO(b"<html>private</html>")
