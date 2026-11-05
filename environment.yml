@@ -1,0 +1,6 @@
+name: gptpartner
+channels:
+  - defaults
+dependencies:
+  - python=3.13
+  - pip

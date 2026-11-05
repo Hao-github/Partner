@@ -1,0 +1,68 @@
+import json
+from dataclasses import replace
+from unittest.mock import Mock
+
+from ai_butler.core.agent import Agent
+from ai_butler.models import IncomingMessage
+from ai_butler.providers.chat_completions import parse_message
+from tests.helpers import ProjectTest, completion, tool_call
+
+
+class AgentTests(ProjectTest):
+    def test_provided_history_is_used_without_being_modified(self):
+        provider = Mock()
+        provider.complete.return_value = {"role": "assistant", "content": "你好，小华"}
+        history = [
+            {"role": "user", "content": "我叫小华"},
+            {"role": "assistant", "content": "收到"},
+        ]
+        before = list(history)
+        incoming = IncomingMessage("test", "user", "a", "继续")
+        result = Agent(provider, self.settings).reply(incoming, history)
+        messages = provider.complete.call_args.args[0]
+        self.assertEqual(messages[1:3], before)
+        self.assertEqual(history, before)
+        self.assertEqual(result.text, "你好，小华")
+        self.assertEqual(result.messages[0], {"role": "user", "content": "继续"})
+        self.assertFalse(self.settings.db_path.exists())
+
+    def test_tool_results_are_sent_back_and_returned_in_complete_turn(self):
+        provider = Mock()
+        provider.complete.side_effect = [
+            parse_message(completion(None, calls=[tool_call("one"), tool_call("two")])),
+            {"role": "assistant", "content": "当前北京时间。"},
+        ]
+        result = Agent(provider, self.settings).reply(
+            IncomingMessage("test", "user", "a", "几点了"), []
+        )
+        messages = provider.complete.call_args.args[0]
+        self.assertEqual(
+            [m["tool_call_id"] for m in messages if m["role"] == "tool"], ["one", "two"]
+        )
+        self.assertEqual(json.loads(messages[-1]["content"])["timezone"], "Asia/Shanghai")
+        self.assertEqual(len(result.messages), 5)
+        self.assertEqual(result.text, "当前北京时间。")
+
+    def test_failure_mid_turn_does_not_modify_history(self):
+        history = [{"role": "user", "content": "之前"}, {"role": "assistant", "content": "收到"}]
+        before = list(history)
+        provider = Mock()
+        provider.complete.side_effect = [
+            parse_message(completion(None, calls=[tool_call()])),
+            RuntimeError("超时"),
+        ]
+        with self.assertRaises(RuntimeError):
+            Agent(provider, self.settings).reply(
+                IncomingMessage("test", "user", "a", "时间"), history
+            )
+        self.assertEqual(history, before)
+        self.assertFalse(self.settings.db_path.exists())
+
+    def test_tool_loop_limit_does_not_return_incomplete_turn(self):
+        provider = Mock()
+        provider.complete.return_value = parse_message(completion(None, calls=[tool_call()]))
+        agent = Agent(provider, replace(self.settings, max_tool_rounds=1))
+        with self.assertRaisesRegex(RuntimeError, "上限"):
+            agent.reply(IncomingMessage("test", "user", "a", "时间"), [])
+        self.assertEqual(provider.complete.call_count, 2)
+        self.assertFalse(self.settings.db_path.exists())

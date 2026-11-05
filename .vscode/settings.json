@@ -1,0 +1,14 @@
+{
+  "python-envs.defaultEnvManager": "ms-python.python:conda",
+  "python-envs.defaultPackageManager": "ms-python.python:conda",
+  "python.defaultInterpreterPath": "C:\\Users\\HUAWEI\\miniconda3\\envs\\gptpartner\\python.exe",
+  "python.terminal.activateEnvironment": true,
+  "python.testing.unittestEnabled": true,
+  "python.testing.pytestEnabled": false,
+  "python.testing.unittestArgs": ["-s", "tests", "-v"],
+  "ruff.configuration": "${workspaceFolder}/pyproject.toml",
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff"
+  },
+  "python.terminal.useEnvFile": true
+}
