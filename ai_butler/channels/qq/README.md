@@ -1,6 +1,6 @@
 # QQ 官方机器人私聊
 
-已实现 WebSocket 私聊接入。内部 `QQChannel(Channel)` 实现平台收发，继承基类的历史读取、去重、回复缓存与保存流程。Agent 统一创建渠道和模型，内部回调接收统一消息与历史并返回 `Reply`；QQ 实现不导入 Agent 或 storage。2026-11-05 曾完成真实 QQ 入站、OpenAI 时间工具调用和私聊回复；后续封装调整通过临时数据库和 mock 网络验证，完整状态见项目根目录 HANDOFF.md。
+已实现 WebSocket 私聊接入。内部 `QQChannel(Channel)` 实现平台收发，继承基类的历史读取、去重、回复缓存与保存流程。Agent 统一创建渠道和模型，内部回调接收统一消息与历史并返回 `Reply`；QQ 实现不导入 Agent 或 storage。2026-11-05 曾完成真实 QQ 入站、OpenAI 时间工具调用和私聊回复；后续封装调整通过临时数据库和 mock 网络验证，当前交接状态见 [docs/HANDOFF.md](../../../docs/HANDOFF.md)。
 
 ## 1. 创建并添加机器人
 

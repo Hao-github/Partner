@@ -2,7 +2,7 @@
 
 终端与 QQ 私聊、SQLite 会话历史、模型工具调用。渠道和模型分别通过基类封装，使用时只需选择渠道、供应商和模型。
 
-内部设计见 [docs 文档入口](docs/README.md)；优化想法、评估和状态见 [优化计划](docs/optimization-plan.md)，已完成事项见 [变更归档](CHANGELOG.md)。
+内部设计见 [docs 文档入口](docs/README.md)；优化想法、评估和状态见 [优化计划](docs/plans/optimizations/README.md)，已完成事项见 [变更归档](docs/archive/CHANGELOG.md)。
 
 ## 直接使用
 
@@ -46,18 +46,18 @@ CLI 和 QQ 都可直接发送以下命令：
 
 数据流为 **Agent.run → Channel 收消息、读取会话 → Agent 路由模型、执行模型与工具循环 → Reply → Channel 保存并发送**。
 
-入口和配置在根目录及 config.py；core 编排，providers 适配模型，channels 管理接入与交付，storage 保证持久化一致性，tools 提供工具，models 定义跨层数据。完整职责与依赖见 [架构设计](docs/architecture.md)。
+入口和配置在根目录及 config.py；core 编排，providers 适配模型，channels 管理接入与交付，storage 保证持久化一致性，tools 提供工具，models 定义跨层数据。完整职责与依赖见 [架构设计](docs/design/architecture.md)。
 
 ## 文档导航
 
 | 文档 | 内容 |
 | --- | --- |
 | [文档入口](docs/README.md) | 阅读顺序、实现状态与维护约定 |
-| [架构设计](docs/architecture.md) | 依赖图、消息契约、事务、生命周期、扩展和设计决策 |
-| [能力设计](docs/capabilities.md) | SOUL.md、上下文、长期记忆、MCP、Skill、睡梦与主动任务 |
-| [运行与可靠性](docs/operations.md) | Linux 常驻、发送恢复、备份、发布与回退方案 |
-| [演进与验收](docs/roadmap.md) | 阶段顺序、架构完整性清单和测试落点 |
-| [变更记录](CHANGELOG.md) | 已完成变化和本地开发历史 |
+| [架构设计](docs/design/architecture.md) | 依赖图、消息契约、事务、生命周期、扩展和设计决策 |
+| [能力设计](docs/design/capabilities.md) | SOUL.md、上下文、长期记忆、MCP、Skill、睡梦与主动任务 |
+| [运行与可靠性](docs/guides/operations.md) | Linux 常驻、发送恢复、备份、发布与回退方案 |
+| [演进与验收](docs/plans/roadmap.md) | 阶段顺序、架构完整性清单和测试落点 |
+| [变更记录](docs/archive/CHANGELOG.md) | 已完成变化和本地开发历史 |
 
 当前已完成文本聊天 MVP；人设文件、长期记忆、MCP、Skill、睡梦整理和云端常驻均处于设计阶段。文档中的拟议模块与命令不代表当前程序已支持。
 
@@ -168,7 +168,7 @@ python -m pyright
 
 测试使用 mock 模型、临时数据库，不调用真实服务。生产入口只连接配置的模型。真实模型与 QQ 连通性需在本机配置凭据后验证。
 
-测试按职责集中在 7 个模块，各组用独立 TestCase 区分；共享替身放在 `tests/helpers.py`，测试模块之间不互相导入。职责对应见 [验证落点](docs/roadmap.md)。可用 `python -m unittest tests.test_app.ModelSwitchTests -v` 单独运行一组。
+测试按职责集中在 7 个模块，各组用独立 TestCase 区分；共享替身放在 `tests/helpers.py`，测试模块之间不互相导入。职责对应见 [验证落点](docs/plans/roadmap.md)。可用 `python -m unittest tests.test_app.ModelSwitchTests -v` 单独运行一组。
 
 Pyright 已启用 `reportDeprecated = "error"`，弃用 API 或类型重载会使检查失败。需要同时检查运行时弃用警告时，执行：
 

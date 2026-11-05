@@ -1,6 +1,6 @@
 # 架构设计
 
-状态：当前实现与后续设计分开标注。实现基线为 `99440c7`；用户入口见 [项目 README](../README.md)，能力演进见 [能力设计](capabilities.md)。
+状态：当前实现与后续设计分开标注。实现基线为 `99440c7`；用户入口见 [项目 README](../../README.md)，能力演进见 [能力设计](capabilities.md)。
 
 ## 目标与范围
 
@@ -28,14 +28,14 @@ flowchart TD
 
 | 模块 | 实际职责 | 边界 |
 | --- | --- | --- |
-| [main.py](../main.py) | 参数、日志输出配置、退出码，创建 Agent | 不维护供应商和渠道名单 |
-| [config.py](../ai_butler/config.py) | 集中加载 .env、环境快照、配置归一化和必要校验 | 业务模块不重新读取环境变量 |
-| [models](../ai_butler/models/) | IncomingMessage、Reply、ModelSelection、Delivery 及消息结构 | 不携带连接、客户端或密钥 |
-| [core/agent.py](../ai_butler/core/agent.py) | 生命周期编排、模型选择与缓存、模型和工具循环 | 不直接创建 SessionStore，不处理平台协议 |
-| [providers](../ai_butler/providers/) | 工厂选择、默认配置，独立模型协议适配 | 不读会话库，不处理渠道事件 |
-| [channels](../ai_butler/channels/) | 公共历史、去重、持久化和交付；子类处理平台 I/O | 具体平台不直接操作 SQLite，不导入 Provider |
-| [storage](../ai_butler/storage/) | 表结构、查询、事务、数据库连接释放 | 不调用模型、工具或平台网络接口 |
-| [tools](../ai_butler/tools/) | 工具 schema、参数校验与执行分发 | 当前只有时间工具；外部能力在此适配 |
+| [main.py](../../main.py) | 参数、日志输出配置、退出码，创建 Agent | 不维护供应商和渠道名单 |
+| [config.py](../../ai_butler/config.py) | 集中加载 .env、环境快照、配置归一化和必要校验 | 业务模块不重新读取环境变量 |
+| [models](../../ai_butler/models/) | IncomingMessage、Reply、ModelSelection、Delivery 及消息结构 | 不携带连接、客户端或密钥 |
+| [core/agent.py](../../ai_butler/core/agent.py) | 生命周期编排、模型选择与缓存、模型和工具循环 | 不直接创建 SessionStore，不处理平台协议 |
+| [providers](../../ai_butler/providers/) | 工厂选择、默认配置，独立模型协议适配 | 不读会话库，不处理渠道事件 |
+| [channels](../../ai_butler/channels/) | 公共历史、去重、持久化和交付；子类处理平台 I/O | 具体平台不直接操作 SQLite，不导入 Provider |
+| [storage](../../ai_butler/storage/) | 表结构、查询、事务、数据库连接释放 | 不调用模型、工具或平台网络接口 |
+| [tools](../../ai_butler/tools/) | 工具 schema、参数校验与执行分发 | 当前只有时间工具；外部能力在此适配 |
 
 公开运行入口为 Agent 的 run、close、inspect。根目录 main.py 是主要命令行入口；包内 __main__.py 和安装命令 ai-butler 目前仍复用同一 main 函数。下划线模块表达内部约定，不是 Python 的访问控制机制。
 
@@ -99,7 +99,7 @@ SessionStore.save 在一个 SQLite 事务内提交上述相关变化，任一写
 
 发送发生在保存之后，mark_sent 是另一笔事务。若发送失败，后续收到同一消息可复用回复而不再次生成。若平台已收到但本地标记失败，存在重复发送窗口；QQ 使用原 msg_id、固定 msg_seq 和平台重复码处理缓解，不承诺跨网络严格恰好一次。
 
-当前 deliveries 没有完整路由、到期时间和重试计划，不足以作为独立 outbox。它也没有启动扫描补发机制。扩展为主动补发前，需要数据库迁移和平台发送规则设计，详见 [运行与可靠性](operations.md)。
+当前 deliveries 没有完整路由、到期时间和重试计划，不足以作为独立 outbox。它也没有启动扫描补发机制。扩展为主动补发前，需要数据库迁移和平台发送规则设计，详见 [运行与可靠性](../guides/operations.md)。
 
 当前建表使用 CREATE TABLE IF NOT EXISTS，没有版本化迁移体系。首次修改已有表时增加显式 schema 版本、升级步骤和回退兼容说明；已有真实数据库不能以删库替代迁移。
 
@@ -138,4 +138,4 @@ Provider 子类声明 default_model、default_base_url；工厂按 NAME_API_KEY 
 | 单进程、QQ 串行、SQLite | 个人负载下保持顺序和事务简单 | 可测量的排队延迟或多用户并发需求 |
 | 人设、记忆、Skill 按需增加 | 先定义数据和用例，避免空壳框架 | 对应阶段的真实任务开始实现 |
 
-完整性缺口及验收条件由 [演进与验收](roadmap.md) 统一跟踪。设计变更先写明触发场景、责任归属、数据/失败语义和验证方式，再决定是否需要新模块或接口。
+完整性缺口及验收条件由 [演进与验收](../plans/roadmap.md) 统一跟踪。设计变更先写明触发场景、责任归属、数据/失败语义和验证方式，再决定是否需要新模块或接口。

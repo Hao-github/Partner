@@ -1,10 +1,10 @@
 # 运行与可靠性
 
-状态：现有本地行为与待实现的云端运行方案。尚无服务器、systemd 配置或部署产物；本文不表示已上线。优先级和验收进度见 [演进与验收](roadmap.md)。
+状态：现有本地行为与待实现的云端运行方案。尚无服务器、systemd 配置或部署产物；本文不表示已上线。优先级和验收进度见 [演进与验收](../plans/roadmap.md)。
 
 ## 当前运行边界
 
-当前主要入口为 `python main.py --channel qq` 或 `python main.py --channel cli`，一个 Agent 管理一个渠道。QQ 主动建立出站 HTTPS / WebSocket 连接，没有业务 HTTP 监听端口。检查和识别模式说明见 [QQ 文档](../ai_butler/channels/qq/README.md)。
+当前主要入口为 `python main.py --channel qq` 或 `python main.py --channel cli`，一个 Agent 管理一个渠道。QQ 主动建立出站 HTTPS / WebSocket 连接，没有业务 HTTP 监听端口。检查和识别模式说明见 [QQ 文档](../../ai_butler/channels/qq/README.md)。
 
 已有请求超时、有限重试、QQ 心跳与重连、SQLite 回复缓存、白名单和限速。尚无独立补发、全轮截止时间、SIGTERM 关闭处理、常驻健康探测或备份任务。--check 只验证凭据和网关，不验证消息权限或模型推理；进程存活也不等于业务可用。
 
