@@ -10,5 +10,6 @@
 | OPT-012 | SessionStore 原子保存 | 已完成（回溯核验） | 2026-11-06 核验并归档 | [结果与证据](CHANGELOG.md#opt-012) |
 | OPT-013 | 对话优化想法的评估与归档约定 | 已完成（文档） | 2026-11-06 完成并归档 | [结果与证据](CHANGELOG.md#opt-013) |
 | OPT-014 | 文档分类与渐进式读取 | 已完成（文档） | 2026-11-06 完成并归档 | [结果与证据](CHANGELOG.md#opt-014) |
+| OPT-015 | 仓库内 Codex 优化评审技能 | 已完成（开发技能） | 2026-11-06 完成并归档 | [结果与证据](CHANGELOG.md#opt-015) |
 
 文本聊天 MVP 的已有基线见 [M0](CHANGELOG.md#m0)。未来方向见 [待优化索引](../plans/optimizations/README.md)；恢复当前协作状态见 [交接摘要](../HANDOFF.md)。

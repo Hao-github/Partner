@@ -15,10 +15,10 @@
 - `.env` 由 `config.py` 集中读取，通过 dataclass 共享实例 `config` 访问；业务模块不再读取环境变量或 .env，专属选项直接从 config.options 取值，并在接入边界转换类型、校验。
 - 按 core、providers、storage、tools、channels 分层；QQ、微信等新增渠道放在 channels 的独立目录，通过 IncomingMessage 接入 Agent。
 
-
 ## 文档按需读取与优化归档
 
 - 需要项目文档时先读 `docs/README.md`，按任务选择索引、目标详情及必要源码；已知 OPT 编号可直接读单项。不要默认全量读取 docs、全部优化项或历史归档。恢复协作/本机环境时才读 `docs/HANDOFF.md`。
+- 评审待优化项、比较优先级或选择下一步时，使用仓库技能 `.agents/skills/review-optimizations/SKILL.md`；普通实现和修复无需额外开展优化评审。
 - 对话产生的优化想法须在本轮去重记录到 `docs/plans/optimizations/opt-xxx.md`，更新同目录 README 摘要；保留稳定编号、来源/日期、问题/方案、涉及模块、可行性、优化度、成本/风险、触发条件、验收和状态。维护时按需读该目录的 `process.md`。
 - 评估须写理由，优化度为预期收益；未经测量不编造提升比例。未完成项区分待评估、候选、进行中、暂缓；记录方向不代表承诺实施，不为计划创建空模块或多余模式。
 - 核对实际结果和验收证据后，将完整完成项移至 `docs/archive/CHANGELOG.md`，从待优化目录移除详情，并更新 `docs/archive/README.md` 的已完成索引及原编号链接；保留来源、评估、完成/核验日期、结果和证据。文档完成不等于功能完成，历史完成日期不得推测。

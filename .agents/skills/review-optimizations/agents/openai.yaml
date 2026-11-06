@@ -1,0 +1,4 @@
+interface:
+  display_name: "项目优化评审"
+  short_description: "评估项目待优化项的优先级、可行性、改动范围、预期收益与取舍，给出实施方案"
+  default_prompt: "使用 $review-optimizations 检查当前待优化项，挑出最值得推进的方向，分析可行性、改动范围、预期收益、tradeoff、实施方案与影响面。"

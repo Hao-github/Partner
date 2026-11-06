@@ -4,10 +4,11 @@
 
 ## 当前状态
 
-- 代码基线 `99440c7`；运行入口为 Agent。已实现 CLI / QQ C2C 文本、OpenAI / DeepSeek、历史与会话隔离、会话模型切换、本地时间工具、回复缓存及有限重试。
+- 代码基线 `11aebf9`（Provider 解析错误装饰器）；文档分类提交为 `bef426a`。运行入口为 Agent。已实现 CLI / QQ C2C 文本、OpenAI / DeepSeek、历史与会话隔离、会话模型切换、本地时间工具、回复缓存及有限重试。
 - 2026-11-05 曾完成本人 QQ 私聊、模型和时间工具真实联调；后续调整由 mock 网络与临时数据库验证。最近交接记录为未部署常驻服务，本轮仅整理文档。
 - 上下文输入预算、SIGTERM、独立补发、SOUL.md、长期记忆、MCP、Skill、睡梦整理及主动任务仍待实现；Grok、Gemini、Telegram、WhatsApp、微信及媒体接入尚未实现。
 - 文档已按设计、运维、计划、归档分类；8 项未来方向按编号拆分。已完成项及其验证保留于归档，目录移动记录见 [OPT-014](archive/CHANGELOG.md#opt-014)。
+- 仓库内 Codex 开发技能 `$review-optimizations` 用于评审与规划，见 [OPT-015](archive/CHANGELOG.md#opt-015)；最近筛选结果见 [评审摘要](plans/optimizations/review.md)。它不为 QQ/CLI 提供运行时 Skill 加载能力。
 
 ## 继续工作时
 
@@ -38,4 +39,4 @@ python -m pyright
 
 ## 最近验证
 
-2026-11-06 文档迁移检查：当前工作区 85 项测试通过，Ruff check 通过，Pyright 0 errors / 0 warnings；111 个本地链接与锚点及代码围栏检查通过。验证覆盖当时工作区的并行改动，具体改动以 git status 为准；本次文档整理未修改运行代码或数据库。
+2026-11-06 开发技能与评审交付：85 项测试、Ruff check 通过，Pyright 0 errors / 0 warnings；技能格式与 UI 元数据校验、129 个本地链接与锚点及代码围栏检查通过。已完成一次按技能进行的实例评审；本次未修改运行代码或数据库，宿主 UI 发现结果尚未独立验证。

@@ -75,6 +75,8 @@ MCP 提供外部工具和资源等能力的连接协议；模型侧仍看到统�
 
 ## Skill 的最小实现
 
+本节与 roadmap M3 描述的是 **GPTPartner 运行时 Skill**，当前尚无加载或选择代码。仓库的 [review-optimizations](../../.agents/skills/review-optimizations/SKILL.md) 是由 Codex 开发环境使用的优化评审技能，不进入 QQ/CLI Agent，也不代表本节验收完成。
+
 Agent Skills 规范使用含 name、description 的 SKILL.md，按需加载正文和参考资料，可附带脚本及资源。[Agent Skills 规范](https://agentskills.io/specification)
 
 对本项目先选择一个已具备底层工具的流程，例如整理用户提供的项目进展。初版由显式命令选择，读取受控目录中的步骤和格式；有多种稳定任务后再增加自动匹配。内容进入上下文组装，不要求修改 Provider 或渠道协议。

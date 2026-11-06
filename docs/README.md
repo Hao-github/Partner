@@ -7,6 +7,7 @@
 | 配置、启动、用户命令 | [项目 README](../README.md) 的对应小节 |
 | 恢复协作状态、处理本机环境 | [交接摘要](HANDOFF.md) |
 | 选择或实施优化 | [待优化索引](plans/optimizations/README.md) → 单项详情 → 所列源码/测试 |
+| 比较优化优先级、重复开展评审 | [开发技能](../.agents/skills/review-optimizations/SKILL.md)；最近结论见 [评审摘要](plans/optimizations/review.md) |
 | 安排能力阶段或检查缺口 | [演进与验收](plans/roadmap.md) |
 | 调整依赖、消息、事务或生命周期 | [架构设计](design/architecture.md) 的相关小节 |
 | 人设、上下文、记忆、MCP、Skill、后台整理 | [能力设计](design/capabilities.md) 的对应能力 |
