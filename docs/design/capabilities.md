@@ -1,6 +1,6 @@
 # 管家能力设计
 
-状态：本文件以待实现能力为主；已有对话、历史、模型选择与 MCP 时间/版本/高德天气。其余文件加载、运行时 Skill 和记忆等仍待实现。当前结构见 [架构设计](architecture.md)。
+状态：本文件以待实现能力为主；已有对话、历史、模型选择与 MCP 版本/高德天气。本地时间工具已退役；其余文件加载、运行时 Skill 和记忆等仍待实现。当前结构见 [架构设计](architecture.md)。
 
 ## 能力分工
 
@@ -67,7 +67,7 @@ SOUL.md 是人设文本的命名约定。OpenClaw 用它表达人格、语气与
 
 MCP 提供外部工具和资源等能力的连接协议；模型侧仍看到统一工具描述和结果。[MCP 架构说明](https://modelcontextprotocol.io/docs/learn/architecture)
 
-已实现：tools 内部 MCPClient 连接本地 stdio 时间/版本服务与高德官方 Streamable HTTP 天气服务，registry 用发现结果汇总描述和分发，随 Agent 关闭会话、子进程与线程。高德仅允许天气工具；配置、版本与失败语义见 [MCP 接入](../guides/mcp.md)。Agent 不出现服务器分支，Provider 只转换模型工具协议。
+已实现：tools 内部 MCPClient 连接本地 stdio 版本服务与高德官方 Streamable HTTP 天气服务，registry 用发现结果汇总描述和分发，随 Agent 关闭会话、子进程与线程。本地时间工具已退役；高德仅允许天气工具，不替代精确时钟。配置、版本与失败语义见 [MCP 接入](../guides/mcp.md)。Agent 不出现服务器分支，Provider 只转换模型工具协议。
 
 已明确连接方式、Config 凭据来源、重名拒绝、局部超时与安全失败提示。整轮预算、资源读取和工具结果大小限制尚待补齐。远端资源与返回文本均按外部数据处理；适配器不重复解析 .env。
 

@@ -5,14 +5,12 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
 
 from ..config import config
-from .clock import get_beijing_time
 from .version import get_version as version_info
 
 
 def create_server() -> MCPServer:
     """独立 stdio 服务；工具函数生成 schema 和执行入口。"""
     server = MCPServer("GPTPartner tools")
-    server.add_tool(get_beijing_time, description="查询当前北京时间、日期与星期。")
 
     @server.tool()
     def get_version(ctx: Context) -> dict[str, Any]:

@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from ai_butler.config import Config, config
 from ai_butler.core import agent as agent_module
-from ai_butler.providers import _create_provider
+from ai_butler.providers import ModelService
 from ai_butler.providers._deepseek import DeepSeekProvider
 from tests.helpers import ProjectTest
 
@@ -30,7 +30,7 @@ class ConfigTests(ProjectTest):
             clear=True,
         ):
             settings = Config()
-        settings = _create_provider(settings).config
+        settings = ModelService._create_provider(settings).config
         self.assertEqual(settings.api_key, "test-key")
         self.assertEqual(settings.config_version, "test-v2")
         self.assertEqual(settings.base_url, "https://api.openai.com/v1")
@@ -105,7 +105,7 @@ class ConfigTests(ProjectTest):
         self.assertEqual(self.settings.base_url, "https://api.deepseek.com")
         deepseek = selected.select_model(provider="deepseek")
         self.assertEqual((deepseek.model, deepseek.base_url), ("", ""))
-        resolved = _create_provider(deepseek).config
+        resolved = ModelService._create_provider(deepseek).config
         self.assertEqual(resolved.model, "deepseek-flash")
         self.assertEqual(resolved.base_url, "https://api.deepseek.com")
 
@@ -117,7 +117,7 @@ class ConfigTests(ProjectTest):
 
     def test_openai_model_is_explicit(self):
         with self.assertRaisesRegex(ValueError, "BUTLER_MODEL"):
-            _create_provider(
+            ModelService._create_provider(
                 replace(
                     self.settings, provider="openai", model="", options={"OPENAI_API_KEY": "test"}
                 )
@@ -136,7 +136,7 @@ class ConfigTests(ProjectTest):
             {"options": {"DEEPSEEK_API_KEY": "test\nheader"}},
         ):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
-                _create_provider(replace(self.settings, **changes))
+                ModelService._create_provider(replace(self.settings, **changes))
 
     def test_options_snapshot_hides_credentials_and_copies_are_independent(self):
         with patch.dict(os.environ, {"FUTURE_API_KEY": "private-key", "FUTURE_LIMIT": "7"}):

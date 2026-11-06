@@ -1,6 +1,6 @@
 # QQ 官方机器人私聊
 
-已实现 WebSocket 私聊接入。内部 `QQChannel(Channel)` 实现平台收发，继承基类的历史读取、去重、回复缓存与保存流程。Agent 统一创建渠道和模型，内部回调接收统一消息与历史并返回 `Reply`；QQ 实现不导入 Agent 或 storage。2026-11-05 曾完成真实 QQ 入站、OpenAI 时间工具调用和私聊回复；后续封装调整通过临时数据库和 mock 网络验证，当前交接状态见 [docs/HANDOFF.md](../../../docs/HANDOFF.md)。
+已实现 WebSocket 私聊接入。`QQChannel(Channel)` 负责平台收发和工作线程，`ChannelService` 管理历史、去重、回复缓存与保存；QQ 实现只把统一消息交给服务回调，不导入 Agent 或 storage。Agent 通过服务接口运行。2026-11-05 曾完成真实 QQ 入站、OpenAI 时间工具调用和私聊回复；后续封装调整通过临时数据库和 mock 网络验证，当前交接状态见 [docs/HANDOFF.md](../../../docs/HANDOFF.md)。
 
 ## 1. 创建并添加机器人
 
@@ -68,7 +68,7 @@ python main.py --channel qq --provider openai --model gpt-5-mini
 建议在 QQ 测试：
 
 1. 发“你好，只回复一句话”，检查普通回复。
-2. 发“现在北京时间几点”，检查时间工具。
+2. 发 `/version` 检查版本工具；已配置高德 Key 时可再询问城市天气。本地时间工具已退役。
 3. 告诉它一个名字，重启程序后继续询问，检查会话历史恢复。
 
 终端出现 READY 代表网关已登录；你的账号仍须在机器人可用范围内，才能验证真正的私聊消息和回复。
@@ -80,12 +80,13 @@ python main.py --channel qq --provider openai --model gpt-5-mini
 | `_channel.py` | 内部 QQChannel：平台收发、允许名单、工作线程、限速、检查与识别 |
 | `_client.py` | 内部 HTTP 实现：Access Token 缓存/刷新、网关查询、纯文本回复 |
 | `_gateway.py` | 内部 WebSocket 实现：Identify / Resume、事件接收、心跳和断线恢复 |
-| `channels/_base.py` | 各渠道共用的会话、去重、保存、交付与存储错误处理 |
+| `channels/_base.py` | 平台收发契约、停止状态、清理与失败呈现钩子 |
+| `channels/_service.py` | 渠道装配、会话、去重、保存、交付与存储错误处理 |
 | `storage/sessions.py` | 同一事务保存对话与回复缓存，封装 SQLite 连接 |
 
-单个工作线程串行运行基类的公共流程，避免阻塞网关心跳。每条消息只在基类打开一个 SQLite 连接，提供历史给业务回调，再保存返回的完整轮次和回复缓存。回调只计算结果，不管理存储。会话键仍为 `qq:<appid>:c2c:<user_openid>`，与 CLI 及其他应用隔离。
+单个工作线程串行运行服务回调，避免阻塞网关心跳。ChannelService 在处理线程打开 SQLite 连接，读取历史，保存业务回调返回的完整轮次和回复缓存，再调用渠道发送并标记交付；渠道不管理存储。会话键仍为 `qq:<appid>:c2c:<user_openid>`，与 CLI 及其他应用隔离。
 
-应用通过 `Agent(channel="qq").run()` 接入，诊断通过 `Agent.inspect("qq", discover=...)` 执行。渠道子包不再导出实现类；内部工厂创建 QQChannel，HTTP 客户端与网关继续由渠道内部创建。
+应用通过 `Agent(channel="qq").run()` 接入，诊断通过 `Agent.inspect("qq", discover=...)` 执行，均交给 ChannelService 选择实现；包入口只导出服务。HTTP 客户端与网关继续由 QQChannel 内部创建。
 
 ## 当前行为与边界
 

@@ -1,8 +1,9 @@
 import re
+from collections.abc import Callable
 
 from ...config import Config, config
-from ...models import IncomingMessage
-from .._base import Channel, MessageHandler
+from ...models import IncomingMessage, Message
+from .._base import Channel, IncomingHandler
 
 _HELP = (
     "命令：/help 帮助；/session 名称 切换会话；/history 查看最近记录；"
@@ -20,11 +21,18 @@ def _session_name(value: str) -> str:
 class CLIChannel(Channel):
     """终端渠道：内部处理命令与会话切换，只把聊天消息交给业务回调。"""
 
-    def __init__(self, session: str = "default", settings: Config = config):
+    def __init__(
+        self,
+        session: str = "default",
+        settings: Config = config,
+        *,
+        history: Callable[[str], list[Message]],
+    ):
         super().__init__(settings)
         self._session = _session_name(session)
+        self._history = history
 
-    def _receive(self, handler: MessageHandler) -> None:
+    def _receive(self, handler: IncomingHandler) -> None:
         print(f"AI 管家 | 会话：{self._session}")
         print(_HELP)
         while not self._stopping.is_set():
@@ -43,7 +51,7 @@ class CLIChannel(Channel):
                 incoming = IncomingMessage(
                     channel="cli", user_id="local", session_id=f"live:{self._session}", text=text
                 )
-                self._process(incoming, handler)
+                handler(incoming)
             except RuntimeError as error:
                 print(f"提示：{error}")
             except KeyboardInterrupt:
@@ -65,7 +73,7 @@ class CLIChannel(Channel):
         return True
 
     def _show_history(self) -> None:
-        history = self.history(f"live:{self._session}")
+        history = self._history(f"live:{self._session}")
         if not history:
             print("当前会话暂无记录。")
         for message in history:

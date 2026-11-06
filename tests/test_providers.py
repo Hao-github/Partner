@@ -5,10 +5,49 @@ from io import BytesIO
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
 
-from ai_butler.providers import _create_provider
+from ai_butler.models import ModelSelection
+from ai_butler.providers import ModelService
 from ai_butler.providers._deepseek import DeepSeekProvider
 from ai_butler.providers._openai import OpenAIProvider
-from tests.helpers import TIME_TOOL, ProjectTest, completion, tool_call
+from tests.helpers import VERSION_TOOL, ProjectTest, completion, tool_call
+
+
+class ModelServiceTests(ProjectTest):
+    def test_model_clients_are_reused_and_services_keep_separate_caches(self):
+        with patch.object(
+            ModelService, "_create_provider", wraps=ModelService._create_provider
+        ) as factory:
+            first = ModelService(settings=self.settings)
+            default = first.default_model
+            alternate = ModelSelection("deepseek", "alternate")
+            first.resolve(default)
+            configured = first.resolve(alternate)
+            first.resolve(alternate)
+            self.assertEqual(factory.call_count, 2)
+            self.assertEqual(configured.model, "alternate")
+            with patch.object(
+                DeepSeekProvider, "complete", return_value={"role": "assistant", "content": "ok"}
+            ):
+                first.complete(alternate, [], [])
+            self.assertEqual(factory.call_count, 2)
+            second = ModelService(settings=self.settings)
+            self.assertIsNot(second.resolve(default), first.resolve(default))
+            self.assertEqual(first.settings.model, self.settings.model)
+            self.assertEqual(self.settings.model, "deepseek-flash")
+
+    def test_metadata_lookup_does_not_create_client_or_bypass_later_validation(self):
+        service = ModelService(settings=self.settings)
+        selection = ModelSelection("openai", "saved-model")
+        with patch.object(
+            ModelService, "_create_provider", wraps=ModelService._create_provider
+        ) as factory:
+            metadata = service.resolve(selection, validate=False)
+            self.assertEqual((metadata.provider, metadata.model), ("openai", "saved-model"))
+            factory.assert_not_called()
+            for _ in range(2):
+                with self.assertRaisesRegex(ValueError, "OPENAI_API_KEY"):
+                    service.complete(selection, [], [])
+            self.assertEqual(factory.call_count, 2)
 
 
 class ProviderTests(ProjectTest):
@@ -23,14 +62,16 @@ class ProviderTests(ProjectTest):
         return client
 
     def test_factory_selects_provider_and_rejects_invalid_config(self):
-        self.assertIsInstance(_create_provider(self.settings), DeepSeekProvider)
+        self.assertIsInstance(ModelService._create_provider(self.settings), DeepSeekProvider)
         settings = self.settings.select_model(provider="openai", model="test-model")
         self.assertIsInstance(
-            _create_provider(replace(settings, options={"OPENAI_API_KEY": "test-key"})),
+            ModelService._create_provider(
+                replace(settings, options={"OPENAI_API_KEY": "test-key"})
+            ),
             OpenAIProvider,
         )
         with self.assertRaisesRegex(ValueError, "BUTLER_PROVIDER"):
-            _create_provider(replace(self.settings, provider="unknown"))
+            ModelService._create_provider(replace(self.settings, provider="unknown"))
 
     def response(self, text="你好"):
         return BytesIO(json.dumps(completion(text)).encode())
@@ -46,13 +87,13 @@ class ProviderTests(ProjectTest):
                 )
                 self.open.return_value = self.response()
                 messages = [{"role": "user", "content": "你好"}]
-                self.assertEqual(client.complete(messages, [TIME_TOOL])["content"], "你好")
+                self.assertEqual(client.complete(messages, [VERSION_TOOL])["content"], "你好")
                 request = self.open.call_args.args[0]
                 payload = json.loads(request.data)
                 self.assertEqual(request.full_url, "https://test.invalid/chat/completions")
                 self.assertEqual(request.get_header("Authorization"), "Bearer test-secret")
                 self.assertEqual(payload["messages"], messages)
-                self.assertEqual(payload["tools"], [TIME_TOOL])
+                self.assertEqual(payload["tools"], [VERSION_TOOL])
                 if name == "deepseek":
                     self.assertEqual(payload["thinking"], {"type": "disabled"})
                     self.assertIn("max_tokens", payload)
@@ -73,7 +114,7 @@ class ProviderTests(ProjectTest):
                     ),
                     self.response(),
                 ]
-                self.assertEqual(client.complete([], [TIME_TOOL])["content"], "你好")
+                self.assertEqual(client.complete([], [VERSION_TOOL])["content"], "你好")
                 self.assertEqual(self.open.call_count, 2)
 
     @patch("ai_butler.providers._base.time.sleep")
@@ -84,7 +125,7 @@ class ProviderTests(ProjectTest):
             self.assertLogs("ai_butler.providers._base") as logs,
             self.assertRaises(RuntimeError) as error,
         ):
-            client.complete([], [TIME_TOOL])
+            client.complete([], [VERSION_TOOL])
         self.assertEqual(self.open.call_count, 3)
         self.assertEqual(sleep.call_count, 2)
         self.assertNotIn("private-key", f"{error.exception}{logs.output}")
@@ -98,7 +139,7 @@ class ProviderTests(ProjectTest):
                         "https://test.invalid", status, "secret", HTTPMessage(), BytesIO(b"secret")
                     )
                     with self.assertRaises(RuntimeError) as error:
-                        client.complete([], [TIME_TOOL])
+                        client.complete([], [VERSION_TOOL])
                     self.assertEqual(self.open.call_count, 1)
                     self.assertIn(name, str(error.exception).lower())
                     self.assertNotIn("secret", str(error.exception))
@@ -109,13 +150,13 @@ class ProviderTests(ProjectTest):
                 client = self.client(max_retries=0)
                 self.open.side_effect = failure
                 with self.assertRaises(RuntimeError) as error:
-                    client.complete([], [TIME_TOOL])
+                    client.complete([], [VERSION_TOOL])
                 self.assertEqual(self.open.call_count, 1)
                 self.assertNotIn("private", str(error.exception))
         client = self.client()
         self.open.return_value = BytesIO(b"<html>private</html>")
         with self.assertRaisesRegex(RuntimeError, "JSON"):
-            client.complete([], [TIME_TOOL])
+            client.complete([], [VERSION_TOOL])
 
     def test_response_format_errors_are_safe_and_not_retried(self):
         for name in ("deepseek", "openai"):
@@ -171,7 +212,7 @@ class ProviderTests(ProjectTest):
                     json.dumps(completion(None, calls=calls, finish="tool_calls")).encode()
                 )
                 self.assertEqual(
-                    client.complete([], [TIME_TOOL]),
+                    client.complete([], [VERSION_TOOL]),
                     {"role": "assistant", "content": None, "tool_calls": calls},
                 )
 

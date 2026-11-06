@@ -5,7 +5,7 @@ from threading import BoundedSemaphore
 
 from ...config import Config, config
 from ...models import IncomingMessage
-from .._base import Channel, MessageHandler
+from .._base import Channel, IncomingHandler
 from ._client import QQClient as _QQClient
 from ._gateway import QQGateway as _QQGateway
 
@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 class QQChannel(Channel):
     """QQ 平台收发：白名单、事件转换、工作线程、限速和原消息回复。
 
-    网关线程只提交任务，单个工作线程运行基类的通用消息流程。
-    会话、缓存和去重均由 Channel 管理，不在这里操作存储。
+    网关线程只提交任务，单个工作线程运行服务提供的消息回调。
+    会话、缓存和去重均由 ChannelService 管理，不在这里操作存储。
     """
 
     def __init__(self, settings: Config = config):
@@ -45,11 +45,11 @@ class QQChannel(Channel):
         finally:
             gateway.close()
 
-    def _receive(self, handler: MessageHandler) -> None:
+    def _receive(self, handler: IncomingHandler) -> None:
         self._gateway = _QQGateway(self._client, lambda data: self._accept(data, handler))
         self._gateway.run()
 
-    def _accept(self, data: dict, handler: MessageHandler) -> None:
+    def _accept(self, data: dict, handler: IncomingHandler) -> None:
         user_id = data["author"]["user_openid"]
         text = data.get("content", "").strip()
         if user_id not in self._settings.qq_allowed_users or not text:
@@ -68,7 +68,7 @@ class QQChannel(Channel):
         if self._stopping.is_set() or not self._slots.acquire(blocking=False):
             logger.warning("qq_queue_full_or_stopping")
             return
-        self._executor.submit(self._process, incoming, handler).add_done_callback(self._done)
+        self._executor.submit(handler, incoming).add_done_callback(self._done)
 
     def _done(self, future: Future) -> None:
         self._slots.release()
@@ -76,7 +76,7 @@ class QQChannel(Channel):
             # 不输出异常正文，防止第三方错误带回私聊内容或凭据。
             logger.error("qq_message_failed; 检查网络、平台权限及模型配置后重新提问")
 
-    def _failure_reply(self, error: RuntimeError) -> str:
+    def failure_reply(self, error: RuntimeError) -> str:
         return "这次模型请求没有完成，请稍后重新提问。"
 
     def _send(self, incoming: IncomingMessage, text: str) -> None:

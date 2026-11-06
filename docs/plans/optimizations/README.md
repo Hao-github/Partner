@@ -1,6 +1,6 @@
 # 待优化项索引
 
-更新：2026-11-06（Asia/Shanghai）。以下 6 项尚未实施，暂缓项未排期。OPT-001/002 已完成并移入归档。先看本表，只打开与当前任务相关的一项详情及源码。
+更新：2026-11-06（Asia/Shanghai）。以下 6 项尚未实施，暂缓项未排期。已完成项移入归档。先看本表，只打开与当前任务相关的一项详情及源码。
 
 | 编号 | 方向 | 状态 | 可行性 | 优化度（当前 → 条件满足后） | 成本 | 实施触发条件 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -15,7 +15,9 @@
 
 最近比较结论见 [优化评审摘要](review.md)；重复开展评审可使用仓库开发技能 `$review-optimizations`，先读索引再展开入选项。
 
-本轮完成：[OPT-001 工具注册表](../../archive/CHANGELOG.md#opt-001)、[OPT-002 通用命令](../../archive/CHANGELOG.md#opt-002)、[OPT-016 真实 MCP 与高德天气](../../archive/CHANGELOG.md#opt-016)。
+最近完成：[OPT-001 工具注册表](../../archive/CHANGELOG.md#opt-001)、[OPT-002 通用命令](../../archive/CHANGELOG.md#opt-002)、[OPT-016 真实 MCP 与高德天气](../../archive/CHANGELOG.md#opt-016)、[OPT-018 退役本地时钟](../../archive/CHANGELOG.md#opt-018)。
+
+[OPT-017 服务层与交付流程](../../archive/CHANGELOG.md#opt-017) 已完成，原提案、评估与验收证据随归档保留。
 
 - 新增、评估或流转条目时读 [维护流程](process.md)。
 - 选择阶段时读 [演进与验收](../roadmap.md)。

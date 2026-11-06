@@ -12,7 +12,7 @@ from websockets.exceptions import ConnectionClosedError
 from websockets.frames import Close
 
 from ai_butler import Agent
-from ai_butler.channels import _create_channel
+from ai_butler.channels import ChannelService
 from ai_butler.channels.qq._channel import QQChannel
 from ai_butler.channels.qq._client import QQClient
 from ai_butler.channels.qq._gateway import QQGateway
@@ -35,7 +35,7 @@ class QQStartupTests(ProjectTest):
     def test_normal_mode_requires_allowlist(self):
         settings = replace(self.settings, qq_app_id="123", qq_app_secret="secret")
         with self.assertRaisesRegex(ValueError, "QQ_ALLOWED_USERS"):
-            _create_channel("qq", settings=settings)
+            ChannelService("qq", settings=settings)
 
     @patch("ai_butler.channels.qq._channel._QQClient")
     def test_check_does_not_require_model_key_or_send_messages(self, client):
@@ -67,8 +67,10 @@ class QQChannelTests(ProjectTest):
         )
         self.client = Mock()
         with patch("ai_butler.channels.qq._channel._QQClient", return_value=self.client):
-            channel = QQChannel(self.qq_settings)
-        self.addCleanup(channel.close)
+            self.service = ChannelService("qq", settings=self.qq_settings)
+        self.addCleanup(self.service.close)
+        channel = self.service._channel
+        assert isinstance(channel, QQChannel)
         return channel
 
     def incoming(self, user="owner", message="message"):
@@ -76,16 +78,14 @@ class QQChannelTests(ProjectTest):
 
     def test_replay_is_deduplicated_across_channel_restart(self):
         handler = Mock(return_value=Reply("模型回答"))
-        channel = self.channel()
-        channel._process(self.incoming(), handler)
-        channel._process(self.incoming(), handler)
+        self.channel()
+        self.service._process(self.incoming(), handler)
+        self.service._process(self.incoming(), handler)
         self.client.send_text.assert_called_once_with("owner", "message", "模型回答")
         handler.assert_called_once_with(self.incoming(), [])
         with patch("ai_butler.channels.qq._channel._QQClient", return_value=self.client):
-            restarted = _create_channel("qq", settings=self.qq_settings)
+            restarted = ChannelService("qq", settings=self.qq_settings)
         self.addCleanup(restarted.close)
-        self.assertIsInstance(restarted, QQChannel)
-        assert isinstance(restarted, QQChannel)
         restarted._process(self.incoming(), handler)
         self.assertEqual(self.client.send_text.call_count, 1)
         cached = self.store().get_delivery(self.incoming())
@@ -93,11 +93,11 @@ class QQChannelTests(ProjectTest):
 
     def test_pending_reply_reuses_handler_result_on_redelivery(self):
         handler = Mock(return_value=Reply("缓存回答"))
-        channel = self.channel()
+        self.channel()
         self.client.send_text.side_effect = [RuntimeError("network"), None]
         with self.assertRaises(RuntimeError):
-            channel._process(self.incoming(), handler)
-        channel._process(self.incoming(), handler)
+            self.service._process(self.incoming(), handler)
+        self.service._process(self.incoming(), handler)
         handler.assert_called_once()
         self.assertEqual(self.client.send_text.call_count, 2)
 
@@ -137,7 +137,7 @@ class QQChannelTests(ProjectTest):
             channel._executor.submit(lambda: None).result(timeout=5)
 
         gateway.return_value.run.side_effect = run
-        channel.receive(handler)
+        self.service.run(handler)
         self.assertEqual(
             received,
             [
@@ -148,23 +148,22 @@ class QQChannelTests(ProjectTest):
         self.assertEqual(self.client.send_text.call_count, 2)
         self.assertEqual(len(set(thread_ids)), 1)
         self.assertNotEqual(thread_ids[0], get_ident())
-        channel.close()
         gateway.return_value.close.assert_called_once()
 
     def test_handler_failure_sends_simple_error_without_saving_turn(self):
-        channel = self.channel()
-        channel._process(self.incoming(), Mock(side_effect=RuntimeError("private-details")))
+        self.channel()
+        self.service._process(self.incoming(), Mock(side_effect=RuntimeError("private-details")))
         reply = self.client.send_text.call_args.args[2]
         self.assertIn("重新提问", reply)
         self.assertNotIn("private", reply)
         self.assertEqual(self.store().load("qq:123:c2c:owner"), [])
 
     def test_reply_hides_platform_target_and_stops_after_close(self):
-        channel = self.channel()
-        channel.reply(self.incoming(), "直接回复")
+        self.channel()
+        self.service.reply(self.incoming(), "直接回复")
         self.client.send_text.assert_called_once_with("owner", "message", "直接回复")
-        channel.close()
-        channel.reply(self.incoming(message="later"), "停止后不发送")
+        self.service.close()
+        self.service.reply(self.incoming(message="later"), "停止后不发送")
         self.assertEqual(self.client.send_text.call_count, 1)
 
     def test_close_cancels_queued_work_and_does_not_send_running_reply(self):
@@ -178,14 +177,18 @@ class QQChannelTests(ProjectTest):
             return Reply("处理中关闭")
 
         handler = Mock(side_effect=respond)
+
+        def receive(incoming):
+            self.service._process(incoming, handler)
+
         channel._accept(
-            {"id": "1", "author": {"user_openid": "owner"}, "content": "第一条"}, handler
+            {"id": "1", "author": {"user_openid": "owner"}, "content": "第一条"}, receive
         )
         self.assertTrue(started.wait(5))
         channel._accept(
-            {"id": "2", "author": {"user_openid": "owner"}, "content": "第二条"}, handler
+            {"id": "2", "author": {"user_openid": "owner"}, "content": "第二条"}, receive
         )
-        closing = Thread(target=channel.close)
+        closing = Thread(target=self.service.close)
         closing.start()
         self.assertTrue(channel._stopping.wait(5))
         release.set()

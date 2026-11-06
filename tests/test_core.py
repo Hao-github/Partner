@@ -1,9 +1,7 @@
 import json
-from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock
 
 from ai_butler.models import IncomingMessage
-from ai_butler.tools.clock import get_beijing_time
 from ai_butler.tools.registry import ToolRegistry
 from tests.helpers import ProjectTest, tool_message
 
@@ -30,18 +28,20 @@ class AgentTests(ProjectTest):
         provider = Mock()
         provider.complete.side_effect = [
             tool_message("one", "two"),
-            {"role": "assistant", "content": "当前北京时间。"},
+            {"role": "assistant", "content": "版本已获取。"},
         ]
         result = self.create_agent(provider, max_tool_rounds=1)._respond(
-            IncomingMessage("test", "user", "a", "几点了"), []
+            IncomingMessage("test", "user", "a", "查询版本"), []
         )
         messages = provider.complete.call_args.args[0]
         self.assertEqual(
             [m["tool_call_id"] for m in messages if m["role"] == "tool"], ["one", "two"]
         )
-        self.assertEqual(json.loads(messages[-1]["content"])["timezone"], "Asia/Shanghai")
+        self.assertEqual(
+            json.loads(messages[-1]["content"])["model"]["version"], self.settings.model
+        )
         self.assertEqual(len(result.messages), 5)
-        self.assertEqual(result.text, "当前北京时间。")
+        self.assertEqual(result.text, "版本已获取。")
 
     def test_failure_mid_turn_does_not_modify_history(self):
         history = [{"role": "user", "content": "之前"}, {"role": "assistant", "content": "收到"}]
@@ -53,7 +53,7 @@ class AgentTests(ProjectTest):
         ]
         with self.assertRaises(RuntimeError):
             self.create_agent(provider)._respond(
-                IncomingMessage("test", "user", "a", "时间"), history
+                IncomingMessage("test", "user", "a", "版本"), history
             )
         self.assertEqual(history, before)
         self.assertFalse(self.settings.db_path.exists())
@@ -63,25 +63,18 @@ class AgentTests(ProjectTest):
         provider.complete.return_value = tool_message("call_1")
         agent = self.create_agent(provider, max_tool_rounds=1)
         with self.assertRaisesRegex(RuntimeError, "上限"):
-            agent._respond(IncomingMessage("test", "user", "a", "时间"), [])
+            agent._respond(IncomingMessage("test", "user", "a", "版本"), [])
         self.assertEqual(provider.complete.call_count, 2)
         self.assertFalse(self.settings.db_path.exists())
 
 
 class ToolTests(ProjectTest):
-    def test_beijing_time_is_current_and_has_correct_offset(self):
-        before = datetime.now(UTC)
-        output = get_beijing_time()
-        actual = datetime.fromisoformat(output["datetime"])
-        self.assertEqual(actual.utcoffset(), timedelta(hours=8))
-        self.assertEqual(output["timezone"], "Asia/Shanghai")
-        self.assertLessEqual(before - timedelta(seconds=1), actual)
-        self.assertLessEqual(actual, datetime.now(UTC))
-
     def test_unknown_tool_and_invalid_arguments_are_rejected(self):
         tools = ToolRegistry(self.settings)
         self.addCleanup(tools.close)
-        self.assertIn("error", json.loads(tools.execute("run_shell", "{}")))
+        for name in ("run_shell", "get_beijing_time"):
+            with self.subTest(name=name):
+                self.assertEqual(json.loads(tools.execute(name, "{}")), {"error": "未知工具。"})
         for arguments in ("not-json", "[]", "null", '{"command":"anything"}'):
             with self.subTest(arguments=arguments):
-                self.assertIn("error", json.loads(tools.execute("get_beijing_time", arguments)))
+                self.assertIn("error", json.loads(tools.execute("get_version", arguments)))

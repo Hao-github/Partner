@@ -13,32 +13,32 @@
 ```mermaid
 flowchart TD
     Entry[main.py] --> Agent[core.Agent]
-    Agent --> CF[渠道工厂]
-    Agent --> PF[供应商工厂]
+    Agent --> CF[ChannelService]
+    Agent --> PF[ModelService]
     Agent --> Tools[tools.registry]
     Tools --> MCP[MCP 客户端适配]
-    MCP --> Builtin[本地 stdio 服务：时间 / 版本]
+    MCP --> Builtin[本地 stdio 服务：版本]
     MCP --> Amap[高德 Streamable HTTP：天气]
-    CF --> Channel[Channel 公共流程]
+    CF --> Channel[Channel 收发契约]
     Channel --> IO[CLI / QQ 平台收发]
-    Channel --> Store[storage.SessionStore]
+    CF --> Store[storage.SessionStore]
     PF --> Provider[Provider 协议适配]
     Provider --> API[模型服务]
     Store --> DB[(SQLite)]
 ```
 
-图中为创建、调用和资源关系。跨层数据统一放在 models；config 为各层提供已读取的配置。Channel 通过回调调用 Agent，不导入 Agent 实现。
+图中为创建、调用和资源关系。跨层数据统一放在 models；config 为各层提供已读取的配置。Channel 将消息交给服务回调，ChannelService 补齐历史并调用 Agent；渠道与服务均不导入 Agent 实现。
 
 | 模块 | 实际职责 | 边界 |
 | --- | --- | --- |
 | [main.py](../../main.py) | 参数、日志输出配置、退出码，创建 Agent | 不维护供应商和渠道名单 |
 | [config.py](../../ai_butler/config.py) | 集中加载 .env、环境快照、配置归一化和必要校验 | 业务模块不重新读取环境变量 |
 | [models](../../ai_butler/models/) | IncomingMessage、Reply、ModelSelection、Delivery 及消息结构 | 不携带连接、客户端或密钥 |
-| [core/agent.py](../../ai_butler/core/agent.py) | 生命周期编排、模型选择与缓存、模型和工具循环 | 不直接创建 SessionStore，不处理平台协议 |
-| [providers](../../ai_butler/providers/) | 工厂选择、默认配置，独立模型协议适配 | 不读会话库，不处理渠道事件 |
-| [channels](../../ai_butler/channels/) | 公共历史、去重、持久化和交付；子类处理平台 I/O | 具体平台不直接操作 SQLite，不导入 Provider |
+| [core/agent.py](../../ai_butler/core/agent.py) | 服务生命周期编排、会话命令、模型和工具循环 | 不导入实现工厂/Provider，不创建 SessionStore |
+| [providers](../../ai_butler/providers/) | ModelService 选择实现、补齐配置并缓存；Provider 适配协议 | 业务方只调用服务，不读取具体客户端 |
+| [channels](../../ai_butler/channels/) | ChannelService 管理历史、去重、持久化与交付；Channel 定义平台收发 | Base 与具体平台不操作 SQLite，不导入 Provider |
 | [storage](../../ai_butler/storage/) | 表结构、查询、事务、数据库连接释放 | 不调用模型、工具或平台网络接口 |
-| [tools](../../ai_butler/tools/) | MCP 服务发现、JSON Schema 校验、执行与资源释放 | 本地时间/版本服务；高德只开放天气，不向外部服务发送模型配置上下文 |
+| [tools](../../ai_butler/tools/) | MCP 服务发现、JSON Schema 校验、执行与资源释放 | 本地版本服务；高德只开放天气，不向外部服务发送模型配置上下文 |
 
 公开运行入口为 Agent 的 run、close、inspect。根目录 main.py 是主要命令行入口；包内 __main__.py 和安装命令 ai-butler 目前仍复用同一 main 函数。下划线模块表达内部约定，不是 Python 的访问控制机制。
 
@@ -64,7 +64,7 @@ CLI 会话键为 `live:<session>`，QQ 为 `qq:<appid>:c2c:<openid>`。当前没
 
 ```mermaid
 sequenceDiagram
-    participant C as Channel 公共流程
+    participant C as ChannelService
     participant S as SessionStore
     participant A as Agent
     participant P as Provider
@@ -111,15 +111,15 @@ SessionStore.save 在一个 SQLite 事务内提交上述相关变化，任一写
 ## 配置与资源生命周期
 
 1. config.py 加载项目 .env，Config 保存环境快照。通用字段直接访问，专属字段从 options 字典读取；使用 int / float 和 dataclasses.replace，不增加取值包装方法。
-2. Agent 初始化时选择 Provider，工厂补齐默认模型和地址并校验，随后创建渠道。QQ 在自身初始化入口调用 validate_qq。导入模块不要求密钥有效；仅做渠道诊断时不创建模型。
-3. Agent 按 ModelSelection 复用 Provider。运行期配置视为启动快照，修改 .env 后重启生效。
+2. Agent 初始化 ModelService / ChannelService。模型服务补齐默认模型和地址并校验，渠道服务装配实现；QQ 在自身初始化入口调用 validate_qq。渠道服务诊断直接调用类型入口，不创建模型或正式渠道实例。
+3. ModelService 按 ModelSelection 复用 Provider，仅验证成功后缓存；版本查询可只查看配置快照。运行期修改 .env 后重启生效。
 4. QQGateway 维护连接、登录、心跳和重连；QQChannel 管理一个工作线程和总量 16 的在途/排队名额。模型耗时不阻塞心跳。
-5. Agent.run 的 finally 调用 close；Channel 设置停止事件，QQ 关闭网关、取消排队任务并等待当前工作结束。当前同步 HTTP 请求不能即时取消，Linux SIGTERM 也尚未接入该关闭流程。
+5. ChannelService.run 在 finally 关闭渠道且只关闭一次；Agent 的 finally 还负责释放工具。服务先标记关闭，再由 Channel 设置停止事件；QQ 关闭网关、取消排队任务并等待当前工作结束。关闭中的回复保留缓存，不标记已发送。同步 HTTP 不能即时取消，Linux SIGTERM 尚未接入。
 6. ToolRegistry 按需建立 MCPClient；每个连接用 AnyIO 后台事件循环持有异步 Client，同步 Agent 经 portal 调用。stdio 使用当前解释器启动本项目服务，远端使用 Streamable HTTP；退出时关闭渠道后在 finally 释放所有 MCP 连接、子进程和线程。
 
 工具的描述与执行连接来自同一份服务发现结果，Tool dataclass 保存描述、客户端与是否携带本地版本上下文。模型标识/配置版本通过 MCP 请求元数据传给本地服务，不作为模型参数，也不发给高德。注册时拒绝重名；天气发现失败保留本地工具。具体配置与版本语义见 [MCP 接入](../guides/mcp.md)。
 
-配置错误使用 ValueError，模型与业务运行失败使用 RuntimeError。Provider 处理网络、JSON 和安全错误提示；Channel 统一转换存储异常。QQ 向用户发送简短失败提示，CLI 可以呈现具体的安全提示。未知工作线程异常只记录固定日志，当前不保证向用户补发失败说明。
+配置错误使用 ValueError，模型与业务运行失败使用 RuntimeError。Provider 处理网络、JSON 和安全错误提示；ChannelService 统一转换存储异常，渠道的 failure_reply 决定平台呈现。QQ 回复简短失败提示，CLI 呈现具体安全提示；未知工作线程异常只记录固定日志。
 
 ## 扩展约定
 
@@ -130,7 +130,7 @@ SessionStore.save 在一个 SQLite 事务内提交上述相关变化，任一写
 | 新工具 | 本地 MCP 服务的工具函数，或 tools 层新增服务器连接与明确允许列表 | 发现与执行一致、重名、参数、失败、关闭；有副作用时另定义授权和幂等 |
 | 新持久数据 | models 数据契约与 storage 的查询、迁移和事务 | 旧库升级、失败回滚、恢复、跨用户隔离 |
 
-新渠道构造器默认接收 Config，实现 _receive(handler)、_send(incoming, text)，按需实现 _close 和 inspect；统一消息交给 _process。CLI 的 session 构造参数目前由工厂特殊处理，属于已有终端配置。
+新渠道构造器默认接收 Config，实现 _receive(handler)、_send(incoming, text)，按需实现 _close、inspect 和 failure_reply；接收消息时调用 handler(incoming)，由服务处理历史和交付。CLI 的 session 与只读历史回调由 ChannelService 注入，渠道只展示数据。
 
 Provider 子类声明 default_model、default_base_url；工厂按 NAME_API_KEY / NAME_MODEL / NAME_BASE_URL 读取选项。当前采用 API Key + HTTPS 配置约定；未来 OAuth、区域端点等不同认证需求应在对应实现中补充配置解析，而非把供应商分支放回 Agent。
 
@@ -138,11 +138,13 @@ Provider 子类声明 default_model、default_base_url；工厂按 NAME_API_KEY 
 
 ## 架构决策与完整性
 
+已实现“调用方 → Service → Base 契约 ← 实现”：包入口只导出 ModelService / ChannelService，选择分支集中在各自 _service.py。Agent 不持有 Provider 客户端；历史、业务调用与回复交付由渠道服务负责，Base 只保留传输模板。完成记录见 [OPT-017](../archive/CHANGELOG.md#opt-017)。ToolRegistry 继续承担现有工具服务职责，不为其他层预建 Service。
+
 | 决策 | 理由 | 重新评估条件 |
 | --- | --- | --- |
 | Agent 门面，内部简单工厂 | 统一入口和选择，新增实现可控 | 出现第三方动态安装需求 |
 | Provider 策略/适配器 | 隐藏不同供应商协议 | 新能力超出现有 Message 契约 |
-| Channel 模板方法 | 去重、历史和保存规则只维护一份 | 主动任务不能自然映射为入站回复时单独设计投递用例 |
+| ChannelService 交付用例、Channel 收发模板 | 公共业务规则只在服务维护，平台只处理协议 | 主动任务需要新的投递策略或路由时单独评估 |
 | 单进程、QQ 串行、SQLite | 个人负载下保持顺序和事务简单 | 可测量的排队延迟或多用户并发需求 |
 | 人设、记忆、Skill 按需增加 | 先定义数据和用例，避免空壳框架 | 对应阶段的真实任务开始实现 |
 

@@ -7,20 +7,19 @@ from dataclasses import replace
 from io import StringIO
 from pathlib import Path
 from threading import Event
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from ai_butler import Agent
-from ai_butler import channels as channel_module
-from ai_butler import providers as provider_module
-from ai_butler.models import IncomingMessage, ModelSelection
-from ai_butler.providers import _create_provider
+from ai_butler.channels import ChannelService
+from ai_butler.models import IncomingMessage, ModelSelection, Reply
+from ai_butler.providers import ModelService
+from ai_butler.providers._deepseek import DeepSeekProvider
 from ai_butler.providers._openai import OpenAIProvider
 from main import main
 from tests.helpers import (
     ExtraProvider,
     ProjectTest,
     RecordingChannel,
-    configure_provider_mock,
     tool_message,
 )
 
@@ -40,8 +39,8 @@ class AppTests(ProjectTest):
                 ]
                 created.append(self)
 
-        provider_type = provider_module._provider_type
-        channel_type = channel_module._channel_type
+        provider_type = ModelService._provider_type
+        channel_type = ChannelService._channel_type
         settings = replace(
             self.settings,
             options=self.settings.options
@@ -54,12 +53,12 @@ class AppTests(ProjectTest):
         )
         with (
             patch.object(
-                provider_module,
+                ModelService,
                 "_provider_type",
                 side_effect=lambda name: ExtraProvider if name == "extra" else provider_type(name),
             ),
             patch.object(
-                channel_module,
+                ChannelService,
                 "_channel_type",
                 side_effect=lambda name: ExtraChannel if name == "extra" else channel_type(name),
             ),
@@ -80,35 +79,34 @@ class AppTests(ProjectTest):
         for flag, discover in (("--check", False), ("--discover", True)):
             with (
                 self.subTest(flag=flag),
-                patch("ai_butler.core.agent._channel_type", return_value=RecordingChannel),
+                patch.object(ChannelService, "_channel_type", return_value=RecordingChannel),
                 patch.object(RecordingChannel, "inspect") as inspect,
                 patch.object(
                     RecordingChannel, "__init__", side_effect=AssertionError("不应创建渠道")
                 ),
-                patch("ai_butler.core.agent._create_provider") as provider,
+                patch("ai_butler.providers._service.ModelService._create_provider") as provider,
                 patch("main.config", self.settings),
             ):
                 self.assertEqual(main(["--channel", "extra", flag]), 0)
                 inspect.assert_called_once_with(discover=discover, settings=self.settings)
                 provider.assert_not_called()
 
-    @patch("ai_butler.core.agent._create_provider")
-    def test_public_agent_runs_tools_and_saves_the_complete_turn(self, factory):
-        provider = configure_provider_mock(factory)
-        provider.complete.side_effect = [
-            tool_message("clock"),
-            {"role": "assistant", "content": "北京时间已获取"},
+    @patch.object(DeepSeekProvider, "complete", autospec=True)
+    def test_public_agent_runs_tools_and_saves_the_complete_turn(self, provider):
+        provider.side_effect = [
+            tool_message("version"),
+            {"role": "assistant", "content": "版本已获取"},
         ]
         output = StringIO()
-        with patch("builtins.input", side_effect=["几点了", "/exit"]), redirect_stdout(output):
+        with patch("builtins.input", side_effect=["查询版本", "/exit"]), redirect_stdout(output):
             Agent(settings=self.settings).run()
-        factory.assert_called_once()
-        self.assertIn("北京时间已获取", output.getvalue())
+        self.assertEqual(provider.call_count, 2)
+        self.assertIn("版本已获取", output.getvalue())
         turn = self.store().load("live:default")
         self.assertEqual(
             [message["role"] for message in turn], ["user", "assistant", "tool", "assistant"]
         )
-        self.assertEqual(turn[2]["tool_call_id"], "clock")
+        self.assertEqual(turn[2]["tool_call_id"], "version")
 
     def test_cli_runtime_options_select_model_without_mutating_shared_config(self):
         settings = replace(
@@ -116,7 +114,9 @@ class AppTests(ProjectTest):
         )
         with (
             patch("main.config", settings),
-            patch("ai_butler.core.agent._create_provider", wraps=_create_provider) as factory,
+            patch.object(
+                ModelService, "_create_provider", wraps=ModelService._create_provider
+            ) as factory,
             patch("ai_butler.providers._openai.OpenAIProvider.complete") as complete,
             patch("builtins.input", side_effect=["测试消息", "/exit"]),
             redirect_stdout(StringIO()),
@@ -152,16 +152,15 @@ class AppTests(ProjectTest):
             accept = gateway.call_args.args[1]
             accept({"id": "1", "author": {"user_openid": "owner"}, "content": "第一条"})
             accept({"id": "2", "author": {"user_openid": "owner"}, "content": "第二条"})
-            self.assertTrue(sent.wait(5), "后台回复未完成")
+            self.assertTrue(sent.wait(settings.timeout), "后台回复未完成")
 
         client.return_value.send_text.side_effect = send
         gateway.return_value.run.side_effect = run
-        with patch("ai_butler.providers._DeepSeekProvider") as provider:
-            configure_provider_mock(provider)
-            provider.return_value.complete.return_value = {"role": "assistant", "content": "收到"}
+        with patch.object(DeepSeekProvider, "complete", autospec=True) as provider:
+            provider.return_value = {"role": "assistant", "content": "收到"}
             Agent(channel="qq", settings=settings).run()
         self.assertEqual(client.return_value.send_text.call_count, 2)
-        messages = provider.return_value.complete.call_args.args[0]
+        messages = provider.call_args.args[1]
         self.assertEqual(
             [m["content"] for m in messages if m["role"] == "user"], ["第一条", "第二条"]
         )
@@ -170,23 +169,26 @@ class AppTests(ProjectTest):
         gateway.return_value.close.assert_called_once()
 
     def test_run_closes_channel_even_when_receive_is_interrupted(self):
-        with patch("ai_butler.core.agent._create_channel") as factory:
-            channel = factory.return_value
+        channel = Mock()
+        with patch.object(ChannelService, "_channel_type", return_value=lambda _: channel):
             channel.receive.side_effect = KeyboardInterrupt()
             app = Agent(settings=self.settings)
-            with self.assertRaises(KeyboardInterrupt):
+            with (
+                patch.object(app._tools, "close") as close_tools,
+                self.assertRaises(KeyboardInterrupt),
+            ):
                 app.run()
         channel.close.assert_called_once()
+        close_tools.assert_called_once()
 
     def test_application_logs_metadata_without_message_body_or_secret(self):
         with (
-            patch("ai_butler.core.agent._create_provider") as provider,
+            patch.object(DeepSeekProvider, "complete", autospec=True) as provider,
             patch("builtins.input", side_effect=["private-body", "/exit"]),
             redirect_stdout(StringIO()),
             self.assertLogs("ai_butler", level="INFO") as logs,
         ):
-            configure_provider_mock(provider)
-            provider.return_value.complete.return_value = {
+            provider.return_value = {
                 "role": "assistant",
                 "content": "private-reply",
             }
@@ -227,6 +229,20 @@ class EntrypointTests(ProjectTest):
 
 
 class ModelSwitchTests(ProjectTest):
+    def test_version_can_describe_restored_model_without_its_credentials(self):
+        store = self.store()
+        store.save(
+            IncomingMessage("cli", "local", "live:default", "/model"),
+            Reply("saved", model=ModelSelection("openai", "saved-model")),
+        )
+        status, output, deepseek, openai = self.run_cli(
+            ["/version", "/exit"], settings=self.settings
+        )
+        self.assertEqual(status, 0)
+        self.assertIn('"version": "saved-model"', output)
+        deepseek.assert_not_called()
+        openai.assert_not_called()
+
     def test_version_command_uses_selected_model_without_model_call_or_history(self):
         status, output, deepseek, openai = self.run_cli(
             ["/model openai session-model", "/version", "/version extra", "/unknown", "/exit"]
@@ -236,8 +252,8 @@ class ModelSwitchTests(ProjectTest):
         self.assertIn('"config_version": "1"', output)
         self.assertIn("用法：/version", output)
         self.assertIn("未知命令", output)
-        deepseek.return_value.complete.assert_not_called()
-        openai.return_value.complete.assert_not_called()
+        deepseek.assert_not_called()
+        openai.assert_not_called()
         self.assertEqual(self.store().load("live:default"), [])
 
     def test_qq_version_command_follows_session_model_without_saving_history(self):
@@ -247,13 +263,12 @@ class ModelSwitchTests(ProjectTest):
             IncomingMessage("qq", "owner", "qq:owner", "/version", "2"),
         ]
         with (
-            patch("ai_butler.core.agent._create_channel", return_value=channel),
-            patch("ai_butler.providers._DeepSeekProvider") as provider,
+            patch.object(ChannelService, "_channel_type", return_value=lambda _: channel),
+            patch.object(DeepSeekProvider, "complete", autospec=True) as provider,
         ):
-            configure_provider_mock(provider)
             Agent(channel="qq", settings=self.settings).run()
         self.assertEqual(json.loads(channel.sent[1])["model"]["version"], "other-model")
-        provider.return_value.complete.assert_not_called()
+        provider.assert_not_called()
         self.assertEqual(self.store().load("qq:owner"), [])
 
     def run_cli(self, inputs, *, settings=None):
@@ -263,18 +278,16 @@ class ModelSwitchTests(ProjectTest):
         )
         with (
             patch("main.config", settings),
-            patch("ai_butler.providers._DeepSeekProvider") as deepseek,
-            patch("ai_butler.providers._OpenAIProvider") as openai,
+            patch.object(DeepSeekProvider, "complete", autospec=True) as deepseek,
+            patch.object(OpenAIProvider, "complete", autospec=True) as openai,
             patch("builtins.input", side_effect=inputs),
             redirect_stdout(output),
         ):
-            configure_provider_mock(deepseek)
-            configure_provider_mock(openai, OpenAIProvider)
-            deepseek.return_value.complete.return_value = {
+            deepseek.return_value = {
                 "role": "assistant",
                 "content": "DeepSeek 回答",
             }
-            openai.return_value.complete.return_value = {
+            openai.return_value = {
                 "role": "assistant",
                 "content": "OpenAI 回答",
             }
@@ -294,12 +307,13 @@ class ModelSwitchTests(ProjectTest):
             ]
         )
         self.assertEqual(status, 0)
-        deepseek.return_value.complete.assert_called_once()
-        self.assertEqual(openai.return_value.complete.call_count, 2)
+        deepseek.assert_called_once()
+        self.assertEqual(openai.call_count, 2)
         self.assertEqual(
-            [call.args[0].model for call in openai.call_args_list], ["test-openai", "next-openai"]
+            [call.args[0].config.model for call in openai.call_args_list],
+            ["test-openai", "next-openai"],
         )
-        messages = openai.return_value.complete.call_args.args[0]
+        messages = openai.call_args.args[1]
         self.assertEqual(
             [m["content"] for m in messages if m["role"] == "user"], ["第一条", "第二条", "第三条"]
         )
@@ -325,8 +339,8 @@ class ModelSwitchTests(ProjectTest):
         )
         self.assertEqual(status, 0)
         self.assertIn("当前模型：deepseek / deepseek-flash", output)
-        self.assertEqual(deepseek.return_value.complete.call_count, 2)
-        openai.return_value.complete.assert_called_once()
+        self.assertEqual(deepseek.call_count, 2)
+        openai.assert_called_once()
         store = self.store()
         self.assertEqual(
             store.get_model("live:default"), ModelSelection("deepseek", "deepseek-flash")
@@ -337,13 +351,13 @@ class ModelSwitchTests(ProjectTest):
     def test_restart_restores_session_model(self):
         status, _, deepseek, openai = self.run_cli(["/model openai test-openai", "/exit"])
         self.assertEqual(status, 0)
-        deepseek.return_value.complete.assert_not_called()
-        openai.return_value.complete.assert_not_called()
+        deepseek.assert_not_called()
+        openai.assert_not_called()
         status, output, deepseek, openai = self.run_cli(["/model", "继续", "/exit"])
         self.assertEqual(status, 0)
         self.assertIn("当前模型：openai / test-openai", output)
-        openai.return_value.complete.assert_called_once()
-        deepseek.return_value.complete.assert_not_called()
+        openai.assert_called_once()
+        deepseek.assert_not_called()
 
     def test_rejected_switch_keeps_previous_model(self):
         status, output, deepseek, openai = self.run_cli(
@@ -362,7 +376,7 @@ class ModelSwitchTests(ProjectTest):
         self.assertIn("用法：/model", output)
         self.assertIsNone(self.store().get_model("live:default"))
         openai.assert_not_called()
-        deepseek.return_value.complete.assert_called_once()
+        deepseek.assert_called_once()
 
     def test_missing_credentials_for_restored_model_can_be_recovered_in_chat(self):
         self.run_cli(["/model openai test-openai", "/exit"])
@@ -372,7 +386,7 @@ class ModelSwitchTests(ProjectTest):
         self.assertEqual(status, 0)
         self.assertIn("模型配置不可用", output)
         self.assertIn("已切换模型：deepseek", output)
-        deepseek.return_value.complete.assert_called_once()
+        deepseek.assert_called_once()
         openai.assert_not_called()
         self.assertEqual(len(self.store().load("live:default")), 2)
 
@@ -390,23 +404,21 @@ class ModelSwitchTests(ProjectTest):
             IncomingMessage("qq", "owner", session, "继续", "3"),
         ]
         with (
-            patch("ai_butler.core.agent._create_channel", return_value=channel),
-            patch("ai_butler.providers._DeepSeekProvider") as deepseek,
-            patch("ai_butler.providers._OpenAIProvider") as openai,
+            patch.object(ChannelService, "_channel_type", return_value=lambda _: channel),
+            patch.object(DeepSeekProvider, "complete", autospec=True) as deepseek,
+            patch.object(OpenAIProvider, "complete", autospec=True) as openai,
         ):
-            configure_provider_mock(deepseek)
-            configure_provider_mock(openai, OpenAIProvider)
-            deepseek.return_value.complete.return_value = {"role": "assistant", "content": "收到"}
+            deepseek.return_value = {"role": "assistant", "content": "收到"}
             Agent(channel="qq", settings=settings).run()
         self.assertEqual(len(channel.sent), 3)
         self.assertEqual(
             self.store().get_model(session), ModelSelection("deepseek", "second-model")
         )
-        self.assertEqual(deepseek.call_args.args[0].model, "second-model")
-        deepseek.return_value.complete.assert_called_once()
-        openai.return_value.complete.assert_not_called()
+        self.assertEqual(deepseek.call_args.args[0].config.model, "second-model")
+        deepseek.assert_called_once()
+        openai.assert_not_called()
 
     def test_chat_text_mentioning_model_command_is_sent_to_model(self):
         status, _, deepseek, _ = self.run_cli(["解释 /model 这个命令", "/exit"])
         self.assertEqual(status, 0)
-        deepseek.return_value.complete.assert_called_once()
+        deepseek.assert_called_once()

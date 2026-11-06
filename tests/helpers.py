@@ -8,17 +8,17 @@ from typing import Any
 from unittest.mock import patch
 
 from ai_butler import Agent
-from ai_butler.channels._base import Channel, MessageHandler
+from ai_butler.channels._base import Channel, IncomingHandler
 from ai_butler.config import Config
 from ai_butler.models import IncomingMessage, Message
+from ai_butler.providers import ModelService
 from ai_butler.providers._base import Provider
-from ai_butler.providers._deepseek import DeepSeekProvider
 from ai_butler.storage.sessions import SessionStore
 
-TIME_TOOL = {
+VERSION_TOOL = {
     "type": "function",
     "function": {
-        "name": "get_beijing_time",
+        "name": "get_version",
         "description": "Provider 透传工具描述的测试样例。",
         "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
     },
@@ -36,7 +36,7 @@ def tool_call(call_id="call_1"):
     return {
         "id": call_id,
         "type": "function",
-        "function": {"name": "get_beijing_time", "arguments": "{}"},
+        "function": {"name": "get_version", "arguments": "{}"},
     }
 
 
@@ -46,18 +46,6 @@ def tool_message(*call_ids: str):
         "content": None,
         "tool_calls": [tool_call(call_id) for call_id in call_ids],
     }
-
-
-def configure_provider_mock(factory, provider_type: type[Provider] = DeepSeekProvider):
-    factory.default_model = provider_type.default_model
-    factory.default_base_url = provider_type.default_base_url
-
-    def create(settings):
-        factory.return_value.config = settings
-        return factory.return_value
-
-    factory.side_effect = create
-    return factory.return_value
 
 
 class ExtraProvider(Provider):
@@ -106,23 +94,23 @@ class ProjectTest(unittest.TestCase):
     def create_agent(self, provider, **changes):
         settings = replace(self.settings, **changes)
         provider.config = settings
-        with patch("ai_butler.core.agent._create_provider", return_value=provider):
+        with patch.object(ModelService, "_create_provider", return_value=provider):
             agent = Agent(settings=settings)
         self.addCleanup(agent.close)
         return agent
 
 
 class RecordingChannel(Channel):
-    """只替换平台收发，实际运行基类的会话与交付流程。"""
+    """只替换平台收发，由服务负责实际会话与交付流程。"""
 
     def __init__(self, settings: Config):
         super().__init__(settings)
         self.messages: list[IncomingMessage] = []
         self.sent: list[str] = []
 
-    def _receive(self, handler: MessageHandler) -> None:
+    def _receive(self, handler: IncomingHandler) -> None:
         for message in self.messages:
-            self._process(message, handler)
+            handler(message)
 
     def _send(self, incoming: IncomingMessage, text: str) -> None:
         self.sent.append(text)

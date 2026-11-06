@@ -21,7 +21,7 @@ class MCPTests(ProjectTest):
         registry = self.registry()
         self.assertEqual(
             [tool["function"]["name"] for tool in registry.schemas],
-            ["get_beijing_time", "get_version"],
+            ["get_version"],
         )
         selected = replace(
             self.settings,
@@ -47,9 +47,6 @@ class MCPTests(ProjectTest):
         self.assertNotIn("hidden-key", result)
         self.assertNotIn("PRIVATE_KEY", result)
         self.assertNotIn(str(self.root), result)
-        self.assertEqual(
-            json.loads(registry.execute("get_beijing_time", "{}"))["timezone"], "Asia/Shanghai"
-        )
         registry.close()
         registry.close()
         with self.assertRaisesRegex(RuntimeError, "关闭"):
@@ -96,7 +93,7 @@ class MCPTests(ProjectTest):
         registry._amap = Mock()
         registry._amap.list_tools.side_effect = RuntimeError("service unavailable")
         with self.assertLogs("ai_butler.tools.registry", "WARNING"):
-            self.assertEqual(len(registry.schemas), 2)
+            self.assertEqual(len(registry.schemas), 1)
         result = registry.execute("get_version", "{}", self.settings)
         self.assertEqual(json.loads(result)["model"]["version"], self.settings.model)
 

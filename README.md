@@ -45,9 +45,9 @@ CLI 和 QQ 都可直接发送以下命令：
 
 ## 文件职责
 
-数据流为 **Agent.run → Channel 收消息、读取会话 → Agent 路由模型、执行模型与工具循环 → Reply → Channel 保存并发送**。
+数据流为 **Agent.run → ChannelService 接收渠道消息、读取会话 → Agent 执行模型与工具循环 → Reply → ChannelService 保存并交付 → Channel 平台发送**。
 
-入口和配置在根目录及 config.py；core 编排，providers 适配模型，channels 管理接入与交付，storage 保证持久化一致性，tools 提供工具，models 定义跨层数据。完整职责与依赖见 [架构设计](docs/design/architecture.md)。
+入口和配置在根目录及 config.py；core 编排，ModelService 管理模型选择与缓存，ChannelService 管理会话与交付，Provider / Channel 实现具体协议，storage 保证持久化一致性。完整职责与依赖见 [架构设计](docs/design/architecture.md)。
 
 ## 文档导航
 
@@ -57,11 +57,11 @@ CLI 和 QQ 都可直接发送以下命令：
 | [架构设计](docs/design/architecture.md) | 依赖图、消息契约、事务、生命周期、扩展和设计决策 |
 | [能力设计](docs/design/capabilities.md) | SOUL.md、上下文、长期记忆、MCP、Skill、睡梦与主动任务 |
 | [运行与可靠性](docs/guides/operations.md) | Linux 常驻、发送恢复、备份、发布与回退方案 |
-| [MCP 工具](docs/guides/mcp.md) | 时间、版本、高德天气的配置和故障边界 |
+| [MCP 工具](docs/guides/mcp.md) | 版本、高德天气的配置和故障边界 |
 | [演进与验收](docs/plans/roadmap.md) | 阶段顺序、架构完整性清单和测试落点 |
 | [变更记录](docs/archive/CHANGELOG.md) | 已完成变化和本地开发历史 |
 
-当前已完成文本聊天 MVP、真实 MCP 时间/版本服务与高德天气接入；人设文件、长期记忆、运行时 Skill、睡梦整理和云端常驻仍处于设计阶段。
+当前已完成文本聊天 MVP、真实 MCP 版本服务与高德天气接入；本地时间工具已退役。人设文件、长期记忆、运行时 Skill、睡梦整理和云端常驻仍处于设计阶段。
 
 ## 安装与启动
 
@@ -138,11 +138,11 @@ Agent.inspect("qq")  # 检查凭据与网关，不要求模型 Key
 Agent.inspect("qq", discover=True)  # 显式识别发送者，不调用模型、不回复
 ```
 
-内部渠道回调接收 `(IncomingMessage, list[Message])`，返回 `Reply(text, messages, model)`；messages 是本次完整轮次，包含用户、模型及工具消息。只返回 `Reply(text)` 会发送文本但不加入会话历史；返回非空 model 时同步更新会话选择。
+ChannelService 的业务回调接收 `(IncomingMessage, list[Message])`，返回 `Reply(text, messages, model)`；messages 是本次完整轮次，包含用户、模型及工具消息。只返回 `Reply(text)` 会发送文本但不加入会话历史；返回非空 model 时同步更新会话选择。
 
-渠道内部管理最近完整轮次、发送目标及平台协议；`receive(handler)` 自动发送回复。没有平台消息 ID 的 CLI 消息不去重，有 ID 的消息按会话与 ID 缓存交付状态。
+ChannelService 管理最近完整轮次和交付缓存，`run(handler)` 完成收消息、业务调用、保存和回复；渠道只管理平台收发。没有平台消息 ID 的 CLI 消息不去重，有 ID 的消息按会话与 ID 缓存交付状态。
 
-维护内部实现时，新增平台继承 `channels/_base.py` 的 Channel，实现 `_receive(handler)`、`_send(incoming, text)`，在内部渠道工厂注册。接收的统一消息交给 `_process`；资源清理放在 `_close()`。新增供应商继承 `providers/_base.py` 的 Provider，在独立模块实现 `complete(messages, tools)` 及安全错误提示，再在内部模型工厂注册。
+维护内部实现时，新增平台继承 `channels/_base.py` 的 Channel，实现 `_receive(handler)`、`_send(incoming, text)`，在 `channels/_service.py` 的唯一选择分支注册。接收消息时调用 `handler(incoming)`，由服务补入历史并处理交付；资源清理放在 `_close()`。新增供应商继承 `providers/_base.py` 的 Provider，实现 `complete(messages, tools)` 及安全错误提示，在 `providers/_service.py` 注册。Agent 不导入这些内部选择函数或具体实现。
 
 ## 日志约定
 

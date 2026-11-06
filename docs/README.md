@@ -5,7 +5,7 @@
 | 当前任务 | 按需读取 |
 | --- | --- |
 | 配置、启动、用户命令 | [项目 README](../README.md) 的对应小节 |
-| 时间、版本和高德天气 MCP | [MCP 接入](guides/mcp.md) |
+| 版本和高德天气 MCP | [MCP 接入](guides/mcp.md) |
 | 恢复协作状态、处理本机环境 | [交接摘要](HANDOFF.md) |
 | 选择或实施优化 | [待优化索引](plans/optimizations/README.md) → 单项详情 → 所列源码/测试 |
 | 比较优化优先级、重复开展评审 | [开发技能](../.agents/skills/review-optimizations/SKILL.md)；最近结论见 [评审摘要](plans/optimizations/review.md) |
@@ -16,6 +16,8 @@
 | 核对已完成事项或历史决策 | [归档索引](archive/README.md) → 对应 changelog 小节 |
 
 目录职责：`design/` 保存设计，`guides/` 保存操作与运行约束，`plans/` 保存未来阶段和未完成项，`archive/` 保存完成记录。
+
+本目录也承担仓库内轻量事项追踪，可理解为小型 Jira：优化索引是待办列表，稳定 OPT 编号关联需求来源、方案、评估、状态和验收证据，完成后进入归档。它管理项目工作，不是管家运行时的任务调度系统；具体状态流转见 [维护流程](plans/optimizations/process.md)。
 
 ## 阅读与维护
 
