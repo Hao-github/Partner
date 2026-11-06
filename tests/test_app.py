@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -226,6 +227,35 @@ class EntrypointTests(ProjectTest):
 
 
 class ModelSwitchTests(ProjectTest):
+    def test_version_command_uses_selected_model_without_model_call_or_history(self):
+        status, output, deepseek, openai = self.run_cli(
+            ["/model openai session-model", "/version", "/version extra", "/unknown", "/exit"]
+        )
+        self.assertEqual(status, 0)
+        self.assertIn('"version": "session-model"', output)
+        self.assertIn('"config_version": "1"', output)
+        self.assertIn("用法：/version", output)
+        self.assertIn("未知命令", output)
+        deepseek.return_value.complete.assert_not_called()
+        openai.return_value.complete.assert_not_called()
+        self.assertEqual(self.store().load("live:default"), [])
+
+    def test_qq_version_command_follows_session_model_without_saving_history(self):
+        channel = RecordingChannel(self.settings)
+        channel.messages = [
+            IncomingMessage("qq", "owner", "qq:owner", "/model other-model", "1"),
+            IncomingMessage("qq", "owner", "qq:owner", "/version", "2"),
+        ]
+        with (
+            patch("ai_butler.core.agent._create_channel", return_value=channel),
+            patch("ai_butler.providers._DeepSeekProvider") as provider,
+        ):
+            configure_provider_mock(provider)
+            Agent(channel="qq", settings=self.settings).run()
+        self.assertEqual(json.loads(channel.sent[1])["model"]["version"], "other-model")
+        provider.return_value.complete.assert_not_called()
+        self.assertEqual(self.store().load("qq:owner"), [])
+
     def run_cli(self, inputs, *, settings=None):
         output = StringIO()
         settings = settings or replace(

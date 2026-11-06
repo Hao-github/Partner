@@ -4,10 +4,10 @@
 
 ## 当前状态
 
-- 代码基线 `11aebf9`（Provider 解析错误装饰器）；文档分类提交为 `bef426a`。运行入口为 Agent。已实现 CLI / QQ C2C 文本、OpenAI / DeepSeek、历史与会话隔离、会话模型切换、本地时间工具、回复缓存及有限重试。
-- 2026-11-05 曾完成本人 QQ 私聊、模型和时间工具真实联调；后续调整由 mock 网络与临时数据库验证。最近交接记录为未部署常驻服务，本轮仅整理文档。
-- 上下文输入预算、SIGTERM、独立补发、SOUL.md、长期记忆、MCP、Skill、睡梦整理及主动任务仍待实现；Grok、Gemini、Telegram、WhatsApp、微信及媒体接入尚未实现。
-- 文档已按设计、运维、计划、归档分类；8 项未来方向按编号拆分。已完成项及其验证保留于归档，目录移动记录见 [OPT-014](archive/CHANGELOG.md#opt-014)。
+- 运行入口为 Agent。已实现 CLI / QQ C2C 文本、OpenAI / DeepSeek、历史与会话隔离、会话模型切换、回复缓存及有限重试；本轮增加真实 MCP 时间/版本服务、高德天气与跨渠道 `/version`。
+- 2026-11-05 曾完成本人 QQ 私聊真实联调；2026-11-06 完成本地 stdio、官方高德天气及模型工具循环联调，未重新验证 QQ 投递或部署常驻服务。
+- 上下文输入预算、SIGTERM、独立补发、SOUL.md、长期记忆、运行时 Skill、睡梦整理及主动任务仍待实现；其他平台和媒体尚未接入。
+- 文档按设计、运维、计划、归档分类；剩余 6 项优化方向暂缓。OPT-001/002 和 MCP 新能力 OPT-016 已归档，见 [完成索引](archive/README.md)；目录移动见 [OPT-014](archive/CHANGELOG.md#opt-014)。
 - 仓库内 Codex 开发技能 `$review-optimizations` 用于评审与规划，见 [OPT-015](archive/CHANGELOG.md#opt-015)；最近筛选结果见 [评审摘要](plans/optimizations/review.md)。它不为 QQ/CLI 提供运行时 Skill 加载能力。
 
 ## 继续工作时
@@ -34,9 +34,10 @@ python -m pyright
 ```
 
 - 本机 `.env` 和数据库包含真实数据，不打印、不清空、不提交；模型 mock 只在 tests。
-- `.vscode/` 保留本地并由 Git 忽略。项目使用自身 Git 仓库；历史提交从归档按需查看，不推送远端。
-- 测试沿用 7 个模块与 `tests/helpers.py`，具体分工见 [验证落点](plans/roadmap.md#验证落点)。
+- `.vscode/` 保留本地并由 Git 忽略。用户已授权 GitHub 推送，origin 为 `https://github.com/Hao-github/Partner.git`，master 跟踪 origin/master；历史提交从归档按需查看。
+- 高德 Key 已配置在本机 `.env` 的 AMAP_MAPS_API_KEY，不打印或提交；配置/版本语义与故障边界见 [MCP 指南](guides/mcp.md)。
+- 测试为 8 个模块与 `tests/helpers.py`，具体分工见 [验证落点](plans/roadmap.md#验证落点)。
 
 ## 最近验证
 
-2026-11-06 开发技能与评审交付：85 项测试、Ruff check 通过，Pyright 0 errors / 0 warnings；技能格式与 UI 元数据校验、129 个本地链接与锚点及代码围栏检查通过。已完成一次按技能进行的实例评审；本次未修改运行代码或数据库，宿主 UI 发现结果尚未独立验证。
+2026-11-06 MCP 交付：94 项测试、Ruff check 通过，Pyright 0 errors / 0 warnings；140 个本地文档链接、围栏及配置凭据泄漏检查通过。真实 stdio 时间/版本调用、高德北京天气及模型调用天气工具后回答通过。无数据库迁移、未读取私人会话。此前开发技能验证保留于 OPT-015；宿主 UI 发现结果仍未独立验证。

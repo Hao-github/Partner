@@ -20,6 +20,7 @@ class ConfigTests(ProjectTest):
             os.environ,
             {
                 "BUTLER_PROVIDER": "openai",
+                "BUTLER_CONFIG_VERSION": "test-v2",
                 "BUTLER_MODEL": "test-model",
                 "OPENAI_API_KEY": "test-key",
                 "BUTLER_TIMEOUT_SECONDS": "12.5",
@@ -31,6 +32,7 @@ class ConfigTests(ProjectTest):
             settings = Config()
         settings = _create_provider(settings).config
         self.assertEqual(settings.api_key, "test-key")
+        self.assertEqual(settings.config_version, "test-v2")
         self.assertEqual(settings.base_url, "https://api.openai.com/v1")
         self.assertEqual(settings.timeout, 12.5)
         self.assertEqual(settings.max_retries, 1)
@@ -123,6 +125,7 @@ class ConfigTests(ProjectTest):
 
     def test_invalid_provider_and_runtime_limits_are_rejected(self):
         for changes in (
+            {"config_version": " "},
             {"provider": "unknown"},
             {"timeout": float("nan")},
             {"timeout": 0},

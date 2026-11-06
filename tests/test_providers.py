@@ -8,8 +8,7 @@ from urllib.error import HTTPError, URLError
 from ai_butler.providers import _create_provider
 from ai_butler.providers._deepseek import DeepSeekProvider
 from ai_butler.providers._openai import OpenAIProvider
-from ai_butler.tools.clock import TIME_TOOL
-from tests.helpers import ProjectTest, completion, tool_call
+from tests.helpers import TIME_TOOL, ProjectTest, completion, tool_call
 
 
 class ProviderTests(ProjectTest):

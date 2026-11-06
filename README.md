@@ -24,7 +24,7 @@ from ai_butler import Agent
 Agent(channel="qq", provider="openai", model="gpt-5-mini").run()
 ```
 
-`run()` 阻塞接收消息，退出时自动关闭渠道。配置校验发生在初始化时；模型和 QQ 的网络请求在运行后才发生。
+`run()` 阻塞接收消息，退出时自动关闭渠道与 MCP 资源。配置校验发生在初始化时；模型、QQ 和 MCP 连接在运行后按需建立。
 
 ## 对话中切换模型
 
@@ -37,6 +37,7 @@ CLI 和 QQ 都可直接发送以下命令：
 | `/model deepseek deepseek-flash` | 切换到另一供应商 |
 | `/model 模型名` | 在当前供应商内更换模型 |
 | `/model default` | 恢复本次启动的默认供应商与模型 |
+| `/version` | 经 MCP 查看应用、配置、当前模型标识与环境版本 |
 
 选择按会话保存到 SQLite，重启后恢复；CLI 的不同 `/session` 和不同 QQ 用户各自独立。启动参数定义默认模型，已有会话保存的选择优先生效。切换保留原对话历史，命令与确认文案不进入模型上下文。
 
@@ -56,10 +57,11 @@ CLI 和 QQ 都可直接发送以下命令：
 | [架构设计](docs/design/architecture.md) | 依赖图、消息契约、事务、生命周期、扩展和设计决策 |
 | [能力设计](docs/design/capabilities.md) | SOUL.md、上下文、长期记忆、MCP、Skill、睡梦与主动任务 |
 | [运行与可靠性](docs/guides/operations.md) | Linux 常驻、发送恢复、备份、发布与回退方案 |
+| [MCP 工具](docs/guides/mcp.md) | 时间、版本、高德天气的配置和故障边界 |
 | [演进与验收](docs/plans/roadmap.md) | 阶段顺序、架构完整性清单和测试落点 |
 | [变更记录](docs/archive/CHANGELOG.md) | 已完成变化和本地开发历史 |
 
-当前已完成文本聊天 MVP；人设文件、长期记忆、MCP、Skill、睡梦整理和云端常驻均处于设计阶段。文档中的拟议模块与命令不代表当前程序已支持。
+当前已完成文本聊天 MVP、真实 MCP 时间/版本服务与高德天气接入；人设文件、长期记忆、运行时 Skill、睡梦整理和云端常驻仍处于设计阶段。
 
 ## 安装与启动
 
@@ -80,7 +82,7 @@ python main.py
 
 `main.py` 和 `python -m ai_butler` 都使用包所在的项目根目录寻找 `.env`。在其他机器可先用 `conda env create -f environment.yml` 建立环境。
 
-运行依赖 `python-dotenv`、`websockets` 统一声明在 `pyproject.toml`，安装项目时一并安装。Ruff、Pyright 是开发检查工具。真实对话会调用收费 API，需具备相应账户、权限和网络连接。
+运行依赖统一声明在 `pyproject.toml`，包括 `python-dotenv`、`websockets`、MCP SDK、异步适配与参数校验依赖，安装项目时一并安装。Ruff、Pyright 是开发检查工具。真实对话会调用收费 API，需具备相应账户、权限和网络连接。
 
 切换 OpenAI：在 `.env` 中设置 `BUTLER_PROVIDER=openai`、`OPENAI_API_KEY`，并将 `BUTLER_MODEL` 改为账户可用且支持 Chat Completions 和 function calling 的模型。自定义过 `BUTLER_BASE_URL` 时也需同步修改或删除。
 
@@ -110,6 +112,8 @@ print(config.history_turns)
 | `BUTLER_HISTORY_TURNS` | 最近 20 轮完整对话进入模型上下文 |
 | `BUTLER_MAX_OUTPUT_TOKENS` | 单次回复最多 2048 tokens |
 | `BUTLER_MAX_TOOL_ROUNDS` | 最多 3 轮工具执行 |
+| `BUTLER_CONFIG_VERSION` | 配置修订号，默认 `1`，手动维护 |
+| `AMAP_MAPS_API_KEY` | 可选；启用高德官方 MCP 天气工具 |
 
 Key 不参与 dataclass 的 repr；日志不输出密钥、请求正文或完整对话。`.env` 和会话数据库已在 `.gitignore` 中排除。
 
@@ -121,7 +125,7 @@ HTTP 的重试循环使用 `range(max_retries + 1)`，包含首次请求；工�
 python main.py --session personal
 ```
 
-命令：`/help`、`/history`、`/session 名称`、`/model`、`/exit`。同名会话重启后继续，不同名称相互隔离。
+命令：`/help`、`/history`、`/session 名称`、`/model`、`/version`、`/exit`。同名会话重启后继续，不同名称相互隔离。
 
 `IncomingMessage` 包含 `channel`、`user_id`、`session_id`、`text`、可选 `message_id` 和会话 `model`。渠道生成会话键：QQ 单聊为 `qq:<appid>:c2c:<user_openid>`，CLI 为 `live:<会话名>`。基类补入已保存的 ModelSelection，业务只使用统一的数据类。
 
@@ -166,9 +170,9 @@ python -m ruff format --check .
 python -m pyright
 ```
 
-测试使用 mock 模型、临时数据库，不调用真实服务。生产入口只连接配置的模型。真实模型与 QQ 连通性需在本机配置凭据后验证。
+测试使用 mock 模型、临时数据库与真实本地 MCP stdio 服务，不连接外部服务。Windows 事件循环允许本机回环连接。真实模型、QQ 与高德连通性需在本机配置凭据后单独验证。
 
-测试按职责集中在 7 个模块，各组用独立 TestCase 区分；共享替身放在 `tests/helpers.py`，测试模块之间不互相导入。职责对应见 [验证落点](docs/plans/roadmap.md)。可用 `python -m unittest tests.test_app.ModelSwitchTests -v` 单独运行一组。
+测试按职责集中在 8 个模块，各组用独立 TestCase 区分；共享替身放在 `tests/helpers.py`，测试模块之间不互相导入。职责对应见 [验证落点](docs/plans/roadmap.md)。可用 `python -m unittest tests.test_app.ModelSwitchTests -v` 单独运行一组。
 
 Pyright 已启用 `reportDeprecated = "error"`，弃用 API 或类型重载会使检查失败。需要同时检查运行时弃用警告时，执行：
 

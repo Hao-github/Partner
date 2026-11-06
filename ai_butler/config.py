@@ -13,6 +13,7 @@ class Config:
     """进程启动时从 .env / 环境变量读取；各模块共享下面的 config 实例。"""
 
     provider: str = field(default_factory=lambda: os.getenv("BUTLER_PROVIDER", "deepseek"))
+    config_version: str = field(default_factory=lambda: os.getenv("BUTLER_CONFIG_VERSION", "1"))
     model: str = field(default_factory=lambda: os.getenv("BUTLER_MODEL", ""))
     base_url: str = field(default_factory=lambda: os.getenv("BUTLER_BASE_URL", ""))
     options: dict[str, str] = field(default_factory=lambda: dict(os.environ), repr=False)
@@ -67,6 +68,8 @@ class Config:
 
     def validate(self) -> None:
         """启动服务前检查必要配置，导入模块本身不要求已填写密钥。"""
+        if not self.config_version.strip():
+            raise ValueError("BUTLER_CONFIG_VERSION 不能为空。")
         if not self.api_key.strip():
             name = f"{self.provider.upper()}_API_KEY"
             raise ValueError(f"请在项目 .env 中填写 {name}。")

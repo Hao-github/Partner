@@ -1,4 +1,5 @@
 import os
+import socket
 import tempfile
 import unittest
 from dataclasses import replace
@@ -13,6 +14,15 @@ from ai_butler.models import IncomingMessage, Message
 from ai_butler.providers._base import Provider
 from ai_butler.providers._deepseek import DeepSeekProvider
 from ai_butler.storage.sessions import SessionStore
+
+TIME_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_beijing_time",
+        "description": "Provider 透传工具描述的测试样例。",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+}
 
 
 def completion(text: str | None = "你好", *, calls=None, finish="stop"):
@@ -66,7 +76,15 @@ class ExtraProvider(Provider):
 
 class ProjectTest(unittest.TestCase):
     def setUp(self):
-        guard = patch("socket.socket.connect", side_effect=AssertionError("测试禁止网络连接"))
+        original_connect = socket.socket.connect
+
+        def connect(sock, address):
+            # Windows asyncio 通过 loopback socketpair 唤醒事件循环。
+            if isinstance(address, tuple) and address[0] in {"127.0.0.1", "::1"}:
+                return original_connect(sock, address)
+            raise AssertionError("测试禁止外部网络连接")
+
+        guard = patch("socket.socket.connect", new=connect)
         guard.start()
         self.addCleanup(guard.stop)
         temp = tempfile.TemporaryDirectory()

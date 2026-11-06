@@ -6,7 +6,7 @@ from .._base import Channel, MessageHandler
 
 _HELP = (
     "命令：/help 帮助；/session 名称 切换会话；/history 查看最近记录；"
-    "/model 查看模型，/model [供应商] 模型名 切换模型；/exit 退出。"
+    "/model 查看或切换模型；/version 查看版本；/exit 退出。"
 )
 _SESSION_PATTERN = re.compile(r"[\w.-]{1,64}\Z")
 
@@ -60,10 +60,6 @@ class CLIChannel(Channel):
                 print(error)
         elif text == "/history":
             self._show_history()
-        elif text.split(maxsplit=1)[0] == "/model":
-            return False
-        elif text.startswith("/"):
-            print(f"未知命令。{_HELP}")
         else:
             return False
         return True

@@ -5,6 +5,7 @@
 | 当前任务 | 按需读取 |
 | --- | --- |
 | 配置、启动、用户命令 | [项目 README](../README.md) 的对应小节 |
+| 时间、版本和高德天气 MCP | [MCP 接入](guides/mcp.md) |
 | 恢复协作状态、处理本机环境 | [交接摘要](HANDOFF.md) |
 | 选择或实施优化 | [待优化索引](plans/optimizations/README.md) → 单项详情 → 所列源码/测试 |
 | 比较优化优先级、重复开展评审 | [开发技能](../.agents/skills/review-optimizations/SKILL.md)；最近结论见 [评审摘要](plans/optimizations/review.md) |

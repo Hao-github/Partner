@@ -1,11 +1,10 @@
 import json
-import unittest
 from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock
 
 from ai_butler.models import IncomingMessage
 from ai_butler.tools.clock import get_beijing_time
-from ai_butler.tools.registry import execute_tool
+from ai_butler.tools.registry import ToolRegistry
 from tests.helpers import ProjectTest, tool_message
 
 
@@ -69,7 +68,7 @@ class AgentTests(ProjectTest):
         self.assertFalse(self.settings.db_path.exists())
 
 
-class ToolTests(unittest.TestCase):
+class ToolTests(ProjectTest):
     def test_beijing_time_is_current_and_has_correct_offset(self):
         before = datetime.now(UTC)
         output = get_beijing_time()
@@ -80,7 +79,9 @@ class ToolTests(unittest.TestCase):
         self.assertLessEqual(actual, datetime.now(UTC))
 
     def test_unknown_tool_and_invalid_arguments_are_rejected(self):
-        self.assertIn("error", json.loads(execute_tool("run_shell", "{}")))
+        tools = ToolRegistry(self.settings)
+        self.addCleanup(tools.close)
+        self.assertIn("error", json.loads(tools.execute("run_shell", "{}")))
         for arguments in ("not-json", "[]", "null", '{"command":"anything"}'):
             with self.subTest(arguments=arguments):
-                self.assertIn("error", json.loads(execute_tool("get_beijing_time", arguments)))
+                self.assertIn("error", json.loads(tools.execute("get_beijing_time", arguments)))
