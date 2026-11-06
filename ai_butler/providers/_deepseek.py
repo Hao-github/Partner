@@ -9,10 +9,12 @@ from ._base import Provider, _response_errors
 class DeepSeekProvider(Provider):
     """内部 DeepSeek 适配：维护请求参数、认证、响应格式及错误提示。"""
 
+    name = "deepseek"
     default_model = "deepseek-flash"
     default_base_url = "https://api.deepseek.com"
 
     def complete(self, messages: list[Message], tools: list[dict[str, Any]]) -> Message:
+        """按 DeepSeek 协议提交文本与工具定义，并转换为统一消息。"""
         request = Request(
             f"{self.config.base_url}/chat/completions",
             data=json.dumps(
@@ -38,6 +40,7 @@ class DeepSeekProvider(Provider):
     @staticmethod
     @_response_errors("DeepSeek")
     def _parse_message(payload: Any) -> Message:
+        """保留文本和工具调用，拒绝被中断或无法识别的回复。"""
         choice = payload["choices"][0]
         if choice.get("finish_reason") in {
             "length",
@@ -57,6 +60,7 @@ class DeepSeekProvider(Provider):
 
     @staticmethod
     def _status_message(status: int) -> str:
+        """将 HTTP 状态映射为安全提示，不包含供应商响应正文。"""
         if status in {401, 403}:
             return "DeepSeek 拒绝认证或访问，请检查 API Key 和权限。"
         if status == 402:

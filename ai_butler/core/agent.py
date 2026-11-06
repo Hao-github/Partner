@@ -34,11 +34,12 @@ class Agent:
         session: str = "default",
         settings: Config = config,
     ):
+        """装配服务与工具；启动配置只在初始化时读取，会话只传模型选择。"""
         self._models = ModelService(provider=provider, model=model, settings=settings)
-        self._settings = self._models.settings
-        self._channel = ChannelService(channel, session=session, settings=self._settings)
+        self._max_tool_rounds = settings.max_tool_rounds
+        self._channel = ChannelService(channel, session=session, settings=settings)
         self._channel_name = channel
-        self._tools = ToolRegistry(self._settings)
+        self._tools = ToolRegistry(settings)
         self._commands = {"/model": self._model_command, "/version": self._version_command}
 
     @staticmethod
@@ -50,7 +51,7 @@ class Agent:
         """运行接收、推理、保存和回复主循环，退出时关闭渠道。"""
         logger.info(
             f"app_started channel={self._channel_name} "
-            f"provider={self._settings.provider} model={self._settings.model}"
+            f"provider={self._models.default_model.provider} model={self._models.default_model.model}"
         )
         try:
             self._channel.run(self._respond)
@@ -66,6 +67,7 @@ class Agent:
         logger.info(f"app_stopped channel={self._channel_name}")
 
     def _respond(self, incoming: IncomingMessage, history: list[Message]) -> Reply:
+        """按会话模型分发命令或普通对话，不修改传入历史。"""
         selection = incoming.model or self._models.default_model
         parts = incoming.text.split()
         if parts and parts[0].startswith("/"):
@@ -79,17 +81,17 @@ class Agent:
     ) -> Reply:
         """内部模型与工具循环；返回完整成功轮次，不修改传入历史。"""
         try:
-            settings = self._models.resolve(selection)
+            self._models.prepare(selection)
         except ValueError as error:
             return Reply(f"模型配置不可用：{error} 可用 /model default 恢复默认模型。")
         turn: list[Message] = [{"role": "user", "content": incoming.text}]
         context: list[Message] = [{"role": "system", "content": _SYSTEM_PROMPT}, *history]
-        for tool_rounds in range(self._settings.max_tool_rounds + 1):
+        for tool_rounds in range(self._max_tool_rounds + 1):
             message = self._models.complete(selection, context + turn, self._tools.schemas)
             turn.append(message)
             if not (calls := message.get("tool_calls")):
                 return Reply(message["content"], turn)
-            if tool_rounds == self._settings.max_tool_rounds:
+            if tool_rounds == self._max_tool_rounds:
                 break
             logger.info(f"tools_requested round={tool_rounds + 1} count={len(calls)}")
             for call in calls:
@@ -99,17 +101,17 @@ class Agent:
                         "role": "tool",
                         "tool_call_id": call["id"],
                         "content": self._tools.execute(
-                            function["name"], function["arguments"], settings
+                            function["name"], function["arguments"], selection
                         ),
                     }
                 )
         raise RuntimeError("工具调用次数已达上限，请换一种方式提问。此轮未保存。")
 
     def _version_command(self, args: list[str], current: ModelSelection) -> Reply:
+        """查询当前模型标识与版本，无需创建或验证当前模型客户端。"""
         if args:
             return Reply("用法：/version 查看应用、配置、当前模型标识与运行环境版本。")
-        settings = self._models.resolve(current, validate=False)
-        return Reply(self._tools.execute("get_version", "{}", settings))
+        return Reply(self._tools.execute("get_version", "{}", current))
 
     def _model_command(self, args: list[str], current: ModelSelection) -> Reply:
         """模型命令不发起请求；选择由渠道与回复一起提交。"""
@@ -124,7 +126,7 @@ class Agent:
         else:
             return Reply(_MODEL_HELP)
         try:
-            self._models.resolve(selected)
+            self._models.prepare(selected)
         except ValueError as error:
             return Reply(f"模型切换失败：{error}")
         logger.info(f"model_selected provider={selected.provider} model={selected.model}")

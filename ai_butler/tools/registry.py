@@ -11,6 +11,7 @@ from mcp.types import RequestParamsMeta, TextContent
 from mcp.types import Tool as MCPTool
 
 from ..config import PROJECT_DIR, Config, config
+from ..models import ModelSelection
 from ._mcp import MCPClient
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ class Tool:
 
     @property
     def schema(self) -> dict[str, Any]:
+        """将 MCP 描述转换为模型工具定义，默认拒绝未声明参数。"""
         parameters = self.descriptor.input_schema.copy()
         parameters.setdefault("additionalProperties", False)
         return {
@@ -40,6 +42,8 @@ class ToolRegistry:
     """MCP 发现结果同时用于模型描述和执行分发；按需建立会话。"""
 
     def __init__(self, settings: Config = config):
+        """保存冻结的启动快照并装配连接，首次发现或调用时才建立会话。"""
+        self._settings = settings
         self._builtin = MCPClient(
             StdioServerParameters(
                 command=sys.executable,
@@ -61,6 +65,7 @@ class ToolRegistry:
     def _load(
         self, client: MCPClient, *, contextual: bool = False, allowed: set[str] | None = None
     ) -> None:
+        """发现并原子注册允许的工具；已加载连接不重复发现。"""
         if client in self._loaded:
             return
         discovered: dict[str, Tool] = {}
@@ -75,6 +80,7 @@ class ToolRegistry:
 
     @property
     def schemas(self) -> list[dict[str, Any]]:
+        """返回可用工具定义；天气发现失败时仍保留本地工具。"""
         self._load(self._builtin, contextual=True)
         if self._amap is not None:
             try:
@@ -83,7 +89,8 @@ class ToolRegistry:
                 logger.warning("mcp_weather_unavailable")
         return [tool.schema for tool in self._tools.values()]
 
-    def execute(self, name: str, arguments: str, settings: Config = config) -> str:
+    def execute(self, name: str, arguments: str, selection: ModelSelection | None = None) -> str:
+        """校验参数并执行工具；本地元数据仅携带版本和当前模型标识。"""
         try:
             params = json.loads(arguments)
             if not isinstance(params, dict):
@@ -99,13 +106,14 @@ class ToolRegistry:
             validate(params, tool.schema["function"]["parameters"])
         except ValidationError:
             return json.dumps({"error": "工具参数不符合要求。"}, ensure_ascii=False)
+        selection = selection or ModelSelection(self._settings.provider, self._settings.model)
         meta: RequestParamsMeta | None = (
             {
                 "gptpartner": {
-                    "provider": settings.provider,
-                    "model": settings.model,
-                    "config_version": settings.config_version,
-                    "environment": settings.options.get("CONDA_DEFAULT_ENV", ""),
+                    "provider": selection.provider,
+                    "model": selection.model,
+                    "config_version": self._settings.config_version,
+                    "environment": self._settings.options.get("CONDA_DEFAULT_ENV", ""),
                 }
             }
             if tool.contextual
@@ -119,6 +127,7 @@ class ToolRegistry:
         return "\n".join(item.text for item in result.content if isinstance(item, TextContent))
 
     def close(self) -> None:
+        """释放所有 MCP 连接和后台资源，可重复调用。"""
         if self._amap is not None:
             self._amap.close()
         self._builtin.close()

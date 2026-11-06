@@ -3,6 +3,7 @@
 - 项目路径为 `C:\Users\HUAWEI\Desktop\program\GPTPartner`。
 - 执行 Python、测试或安装依赖前，先激活 `conda activate gptpartner`；不要使用 base 或系统 Python 运行项目。
 - 用户偏好简洁代码、短函数、dataclass 和早返回。仅在配置、网络、工具参数等外部边界保留必要校验，避免对标准 API 响应逐字段重复检查或添加无法到达的兜底分支。
+- 函数使用简短中文 docstring 说明职责与关键边界，不逐行复述代码。
 - 直接使用字典、int / float、dataclasses.replace 等 Python 内置能力；不为单次取值、类型转换或参数转发增加薄封装。抽象应承担协议适配、校验、生命周期或共享业务规则等实际职责。
 - 动态文本优先使用 f-string，包括日志；日志布局模板使用 `{}` 风格，SQL 参数继续使用占位符绑定。短路、赋值表达式和模式匹配以清晰表达流程为准，保留必要的状态初始化。
 - 架构沿用 Agent 统一入口、ModelService / ChannelService 组合策略、Provider 协议适配、Channel 收发模板和 SessionStore 事务封装；实现选择与装配集中在服务内部的唯一工厂。ChannelService 管理历史、去重、业务调用与回复交付，Channel Base 不操作存储；Agent 只依赖服务接口。

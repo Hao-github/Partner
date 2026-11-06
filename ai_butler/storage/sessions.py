@@ -15,6 +15,7 @@ class SessionStore:
     """
 
     def __init__(self, path: Path = config.db_path):
+        """在当前线程打开数据库，按需创建目录及现有表结构。"""
         path.parent.mkdir(parents=True, exist_ok=True)
         self._connection = sqlite3.connect(path, timeout=5)
         self._connection.executescript("""
@@ -38,6 +39,7 @@ class SessionStore:
         """)
 
     def load(self, session_id: str, limit: int = 20) -> list[Message]:
+        """按时间顺序返回最近若干完整轮次，不拆分工具调用与结果。"""
         rows = self._connection.execute(
             "SELECT messages_json FROM (SELECT id, messages_json FROM turns "
             "WHERE session_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id",
@@ -46,6 +48,7 @@ class SessionStore:
         return [message for (payload,) in rows for message in json.loads(payload)]
 
     def get_delivery(self, incoming: IncomingMessage) -> Delivery | None:
+        """按平台消息键查询回复缓存；无消息标识时不做去重。"""
         if not incoming.message_id:
             return None
         row = self._connection.execute(
@@ -82,6 +85,7 @@ class SessionStore:
                 )
 
     def mark_sent(self, incoming: IncomingMessage) -> None:
+        """在独立事务中标记已有回复已发送，无平台标识时跳过。"""
         if not incoming.message_id:
             return
         with self._connection:
@@ -91,13 +95,17 @@ class SessionStore:
 
     @staticmethod
     def _key(incoming: IncomingMessage) -> str:
+        """组合会话和平台消息标识，避免不同会话共享去重键。"""
         return f"{incoming.session_id}:{incoming.message_id}"
 
     def __enter__(self) -> Self:
+        """返回当前存储实例，由各写入方法管理事务。"""
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
+        """离开上下文时关闭当前线程的连接。"""
         self.close()
 
     def close(self) -> None:
+        """释放 SQLite 连接。"""
         self._connection.close()

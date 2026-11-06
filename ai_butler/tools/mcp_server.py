@@ -1,4 +1,3 @@
-from dataclasses import replace
 from typing import Any
 
 from mcp.server import MCPServer
@@ -18,14 +17,12 @@ def create_server() -> MCPServer:
         context = (ctx.request_context.meta or {}).get("gptpartner", {})
         if not isinstance(context, dict):
             raise TypeError("版本查询上下文必须是对象。")
-        settings = replace(
-            config,
+        return version_info(
             provider=str(context.get("provider", config.provider)),
             model=str(context.get("model", config.model)),
             config_version=str(context.get("config_version", config.config_version)),
-            options={"CONDA_DEFAULT_ENV": str(context.get("environment", ""))},
+            environment=str(context.get("environment", "")),
         )
-        return version_info(settings)
 
     return server
 

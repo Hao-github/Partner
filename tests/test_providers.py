@@ -20,30 +20,36 @@ class ModelServiceTests(ProjectTest):
             first = ModelService(settings=self.settings)
             default = first.default_model
             alternate = ModelSelection("deepseek", "alternate")
-            first.resolve(default)
-            configured = first.resolve(alternate)
-            first.resolve(alternate)
+            first.prepare(default)
+            first.prepare(alternate)
+            first.prepare(alternate)
             self.assertEqual(factory.call_count, 2)
-            self.assertEqual(configured.model, "alternate")
             with patch.object(
-                DeepSeekProvider, "complete", return_value={"role": "assistant", "content": "ok"}
-            ):
+                DeepSeekProvider,
+                "complete",
+                autospec=True,
+                return_value={"role": "assistant", "content": "ok"},
+            ) as complete:
                 first.complete(alternate, [], [])
-            self.assertEqual(factory.call_count, 2)
-            second = ModelService(settings=self.settings)
-            self.assertIsNot(second.resolve(default), first.resolve(default))
-            self.assertEqual(first.settings.model, self.settings.model)
+                client = complete.call_args.args[0]
+                self.assertEqual(client.config.model, "alternate")
+                first.complete(alternate, [], [])
+                self.assertIs(complete.call_args.args[0], client)
+                self.assertEqual(factory.call_count, 2)
+                first.complete(default, [], [])
+                default_client = complete.call_args.args[0]
+                second = ModelService(settings=self.settings)
+                second.complete(default, [], [])
+                self.assertIsNot(complete.call_args.args[0], default_client)
+            self.assertEqual(first.default_model, default)
             self.assertEqual(self.settings.model, "deepseek-flash")
 
-    def test_metadata_lookup_does_not_create_client_or_bypass_later_validation(self):
+    def test_failed_preparation_does_not_cache_client_or_bypass_later_validation(self):
         service = ModelService(settings=self.settings)
         selection = ModelSelection("openai", "saved-model")
         with patch.object(
             ModelService, "_create_provider", wraps=ModelService._create_provider
         ) as factory:
-            metadata = service.resolve(selection, validate=False)
-            self.assertEqual((metadata.provider, metadata.model), ("openai", "saved-model"))
-            factory.assert_not_called()
             for _ in range(2):
                 with self.assertRaisesRegex(ValueError, "OPENAI_API_KEY"):
                     service.complete(selection, [], [])
@@ -52,6 +58,7 @@ class ModelServiceTests(ProjectTest):
 
 class ProviderTests(ProjectTest):
     def client(self, **changes):
+        changes.setdefault("options", {**self.settings.options, "OPENAI_API_KEY": "test-openai"})
         settings = replace(self.settings, **changes)
         provider_type = DeepSeekProvider if settings.provider == "deepseek" else OpenAIProvider
         client = provider_type(settings)
@@ -63,15 +70,39 @@ class ProviderTests(ProjectTest):
 
     def test_factory_selects_provider_and_rejects_invalid_config(self):
         self.assertIsInstance(ModelService._create_provider(self.settings), DeepSeekProvider)
-        settings = self.settings.select_model(provider="openai", model="test-model")
         self.assertIsInstance(
             ModelService._create_provider(
-                replace(settings, options={"OPENAI_API_KEY": "test-key"})
+                replace(self.settings, options={"OPENAI_API_KEY": "test-key"}),
+                provider="openai",
+                model="test-model",
             ),
             OpenAIProvider,
         )
         with self.assertRaisesRegex(ValueError, "BUTLER_PROVIDER"):
             ModelService._create_provider(replace(self.settings, provider="unknown"))
+
+    def test_provider_defaults_and_overrides_are_resolved_during_initialization(self):
+        settings = replace(
+            self.settings,
+            model="",
+            base_url="",
+            options={
+                **self.settings.options,
+                "DEEPSEEK_MODEL": "configured-model",
+                "DEEPSEEK_BASE_URL": "https://custom.invalid/",
+            },
+        )
+        configured = DeepSeekProvider(settings).config
+        self.assertEqual(configured.model, "configured-model")
+        self.assertEqual(configured.base_url, "https://custom.invalid")
+        explicit = DeepSeekProvider(
+            replace(settings, model="startup-model", base_url="https://startup.invalid"),
+            model="session-model",
+        ).config
+        self.assertEqual(explicit.model, "session-model")
+        self.assertEqual(explicit.base_url, "https://startup.invalid")
+        self.assertEqual(settings.model, "")
+        self.assertEqual(settings.base_url, "")
 
     def response(self, text="你好"):
         return BytesIO(json.dumps(completion(text)).encode())

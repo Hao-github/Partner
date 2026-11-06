@@ -35,7 +35,7 @@ flowchart TD
 | [config.py](../../ai_butler/config.py) | 集中加载 .env、环境快照、配置归一化和必要校验 | 业务模块不重新读取环境变量 |
 | [models](../../ai_butler/models/) | IncomingMessage、Reply、ModelSelection、Delivery 及消息结构 | 不携带连接、客户端或密钥 |
 | [core/agent.py](../../ai_butler/core/agent.py) | 服务生命周期编排、会话命令、模型和工具循环 | 不导入实现工厂/Provider，不创建 SessionStore |
-| [providers](../../ai_butler/providers/) | ModelService 选择实现、补齐配置并缓存；Provider 适配协议 | 业务方只调用服务，不读取具体客户端 |
+| [providers](../../ai_butler/providers/) | ModelService 选择并缓存客户端；Provider 初始化模型配置并适配协议 | 业务方只传 ModelSelection，不读取模型配置或客户端 |
 | [channels](../../ai_butler/channels/) | ChannelService 管理历史、去重、持久化与交付；Channel 定义平台收发 | Base 与具体平台不操作 SQLite，不导入 Provider |
 | [storage](../../ai_butler/storage/) | 表结构、查询、事务、数据库连接释放 | 不调用模型、工具或平台网络接口 |
 | [tools](../../ai_butler/tools/) | MCP 服务发现、JSON Schema 校验、执行与资源释放 | 本地版本服务；高德只开放天气，不向外部服务发送模型配置上下文 |
@@ -110,9 +110,9 @@ SessionStore.save 在一个 SQLite 事务内提交上述相关变化，任一写
 
 ## 配置与资源生命周期
 
-1. config.py 加载项目 .env，Config 保存环境快照。通用字段直接访问，专属字段从 options 字典读取；使用 int / float 和 dataclasses.replace，不增加取值包装方法。
-2. Agent 初始化 ModelService / ChannelService。模型服务补齐默认模型和地址并校验，渠道服务装配实现；QQ 在自身初始化入口调用 validate_qq。渠道服务诊断直接调用类型入口，不创建模型或正式渠道实例。
-3. ModelService 按 ModelSelection 复用 Provider，仅验证成功后缓存；版本查询可只查看配置快照。运行期修改 .env 后重启生效。
+1. config.py 加载项目 .env，冻结的 Config 初始化时归一化并校验公共配置，options 复制为只读环境快照。通用字段直接访问，专属字段在接入边界用 int / float 转换；独立快照可用 dataclasses.replace 创建。
+2. Agent 将同一启动快照交给 ModelService / ChannelService 和 ToolRegistry。模型工厂只选类型并构造实例；Provider 初始化完整、冻结的 ModelConfig，解析自身默认模型、地址和凭据并校验，不携带渠道与存储配置。渠道服务装配实现，QQ 在自身初始化入口调用 validate_qq；独立诊断不创建模型或正式渠道实例。
+3. ModelService 按 ModelSelection 复用 Provider，prepare 仅在未缓存时创建并校验客户端，不向外返回配置。会话切换不修改或复制 Config；版本查询直接传当前模型标识，不要求该模型凭据可用。运行期修改 .env 后重启生效。
 4. QQGateway 维护连接、登录、心跳和重连；QQChannel 管理一个工作线程和总量 16 的在途/排队名额。模型耗时不阻塞心跳。
 5. ChannelService.run 在 finally 关闭渠道且只关闭一次；Agent 的 finally 还负责释放工具。服务先标记关闭，再由 Channel 设置停止事件；QQ 关闭网关、取消排队任务并等待当前工作结束。关闭中的回复保留缓存，不标记已发送。同步 HTTP 不能即时取消，Linux SIGTERM 尚未接入。
 6. ToolRegistry 按需建立 MCPClient；每个连接用 AnyIO 后台事件循环持有异步 Client，同步 Agent 经 portal 调用。stdio 使用当前解释器启动本项目服务，远端使用 Streamable HTTP；退出时关闭渠道后在 finally 释放所有 MCP 连接、子进程和线程。
@@ -132,7 +132,7 @@ SessionStore.save 在一个 SQLite 事务内提交上述相关变化，任一写
 
 新渠道构造器默认接收 Config，实现 _receive(handler)、_send(incoming, text)，按需实现 _close、inspect 和 failure_reply；接收消息时调用 handler(incoming)，由服务处理历史和交付。CLI 的 session 与只读历史回调由 ChannelService 注入，渠道只展示数据。
 
-Provider 子类声明 default_model、default_base_url；工厂按 NAME_API_KEY / NAME_MODEL / NAME_BASE_URL 读取选项。当前采用 API Key + HTTPS 配置约定；未来 OAuth、区域端点等不同认证需求应在对应实现中补充配置解析，而非把供应商分支放回 Agent。
+Provider 子类声明 name、default_model、default_base_url；初始化时按 NAME_API_KEY / NAME_MODEL / NAME_BASE_URL 读取选项。显式会话模型优先于同供应商的启动模型，再取供应商选项与子类默认值；启动地址只用于 Config.provider 对应的供应商，跨供应商时使用各自选项或默认地址。当前采用 API Key + HTTPS 配置约定；未来 OAuth、区域端点等不同认证需求应在对应实现中补充配置解析，而非把供应商分支放回 Agent。
 
 新增实现需要导入与一个选择分支；不修改 Agent、CLI 路由或会话存储的名单。第三种 Provider + Channel 的流程测试已经验证这一边界，但不代表真实第三方协议已接入。
 

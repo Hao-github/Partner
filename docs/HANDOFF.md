@@ -9,11 +9,12 @@
 - 上下文输入预算、SIGTERM、独立补发、SOUL.md、长期记忆、运行时 Skill、睡梦整理及主动任务仍待实现；其他平台和媒体尚未接入。
 - 剩余 6 项优化方向暂缓；[OPT-017](archive/CHANGELOG.md#opt-017) 的服务与渠道交付迁移已完成。完整结果见 [完成索引](archive/README.md)，后续想法只维护单项详情与优化索引，避免多份文档重复维护。
 - OPT-017 最终边界：ModelService 管理模型配置、选择和客户端缓存；ChannelService 管理历史、去重、业务调用、保存及回复交付。Base 只保留平台契约与停止/清理钩子；服务专属工厂为 staticmethod。测试使用真实本地客户端，仅 mock 模型 complete，不再模拟整类默认值与配置赋值。
+- [OPT-019](archive/CHANGELOG.md#opt-019) 已冻结 Config 与 options；Provider 初始化并校验完整、冻结的 ModelConfig，工厂只选类型和构造实例。Agent 不再读取模型配置，模型切换与工具调用只传 ModelSelection；生产函数均补齐中文 docstring。
 - 仓库内 Codex 开发技能 `$review-optimizations` 用于评审与规划，见 [OPT-015](archive/CHANGELOG.md#opt-015)；最近筛选结果见 [评审摘要](plans/optimizations/review.md)。它不为 QQ/CLI 提供运行时 Skill 加载能力。
 
 ## 继续工作时
 
-本轮只收尾并推送，不推进剩余项。新对话先读本摘要，再按优化索引选择单项；不要默认按编号实施。后续每完成一个灵感文件，执行检查、归档、简短更新本摘要，然后提交并 push 一次；长期约定见 AGENTS.md。
+本轮完成 OPT-019，不推进剩余项。新对话先读本摘要，再按优化索引选择单项；不要默认按编号实施。后续每完成一个灵感文件，执行检查、归档、简短更新本摘要，然后提交并 push 一次；长期约定见 AGENTS.md。
 
 | 任务 | 读取入口 |
 | --- | --- |
@@ -43,4 +44,4 @@ python -m pyright
 
 ## 最近验证
 
-2026-11-06 OPT-017 最终精简：97 项测试、Ruff check / format check 通过，Pyright 0 errors / 0 warnings。QQ 测试等待使用配置超时，避免 MCP 子进程首次启动被固定 5 秒误判；缓存、切换、独立诊断、关闭及完整工具轮次通过。代码验证后仅更新交接与交付约定，无依赖或数据库迁移、未读取私人会话。真实 MCP/天气联调留在 OPT-016；本轮未重新验证外部服务，开发技能宿主 UI 发现结果仍未独立验证。交付基线为包含本摘要的最新提交，可用 git log -1 查看。
+2026-11-06 OPT-019：100 项测试、Ruff check / format check 通过，Pyright 0 errors / 0 warnings；配置冻结、供应商默认值与覆盖、缓存、模型切换及无凭据版本查询通过，所有生产函数的 docstring 已核对。无依赖或数据库迁移，未读取私人会话、未重新联调外部服务；真实 MCP/天气联调留在 OPT-016。交付基线为包含本摘要的最新提交，可用 git log -1 查看。

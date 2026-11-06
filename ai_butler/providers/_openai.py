@@ -9,9 +9,11 @@ from ._base import Provider, _response_errors
 class OpenAIProvider(Provider):
     """内部 OpenAI 适配：维护请求参数、认证、响应格式及错误提示。"""
 
+    name = "openai"
     default_base_url = "https://api.openai.com/v1"
 
     def complete(self, messages: list[Message], tools: list[dict[str, Any]]) -> Message:
+        """按 OpenAI 协议提交文本与工具定义，并转换为统一消息。"""
         request = Request(
             f"{self.config.base_url}/chat/completions",
             data=json.dumps(
@@ -36,6 +38,7 @@ class OpenAIProvider(Provider):
     @staticmethod
     @_response_errors("OpenAI")
     def _parse_message(payload: Any) -> Message:
+        """保留文本和工具调用，拒绝被截断或无法识别的回复。"""
         choice = payload["choices"][0]
         if choice.get("finish_reason") in {"length", "content_filter"}:
             raise RuntimeError("OpenAI 回复被截断或中止，请缩短输入、调整输出上限后重试。")
@@ -50,6 +53,7 @@ class OpenAIProvider(Provider):
 
     @staticmethod
     def _status_message(status: int) -> str:
+        """将 HTTP 状态映射为安全提示，不包含供应商响应正文。"""
         if status in {401, 403}:
             return "OpenAI 拒绝认证或访问，请检查 API Key、权限及服务可用地区。"
         if status == 429:

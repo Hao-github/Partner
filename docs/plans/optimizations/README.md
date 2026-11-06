@@ -19,6 +19,8 @@
 
 [OPT-017 服务层与交付流程](../../archive/CHANGELOG.md#opt-017) 已完成，原提案、评估与验收证据随归档保留。
 
+[OPT-019 冻结启动配置与模型配置边界](../../archive/CHANGELOG.md#opt-019) 已完成，包含函数注释、配置不可变与会话切换回归证据。
+
 - 新增、评估或流转条目时读 [维护流程](process.md)。
 - 选择阶段时读 [演进与验收](../roadmap.md)。
 - 查已完成事项时读 [归档索引](../../archive/README.md)，再打开对应 changelog 条目。

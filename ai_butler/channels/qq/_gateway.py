@@ -18,6 +18,7 @@ class QQGateway:
     """QQ 渠道内部的 WebSocket 状态机：维护登录、心跳、重连和事件接收。"""
 
     def __init__(self, client: QQClient, on_message: Callable[[dict], None]):
+        """保存 HTTP 客户端与事件回调，初始化恢复会话和停止状态。"""
         self.client = client
         self.on_message = on_message
         self.session_id = ""
@@ -26,6 +27,7 @@ class QQGateway:
         self._socket: ClientConnection | None = None
 
     def identify(self) -> dict:
+        """根据已有会话生成首次鉴权或断线恢复载荷。"""
         token = f"QQBot {self.client.access_token()}"
         if self.session_id:
             return {
@@ -35,6 +37,7 @@ class QQGateway:
         return {"op": 2, "d": {"token": token, "intents": PRIVATE_MESSAGE_INTENT, "shard": [0, 1]}}
 
     def dispatch(self, payload: dict) -> None:
+        """更新事件序列和登录状态，将私聊事件交给渠道回调。"""
         self.sequence = payload["s"]
         match payload.get("t"):
             case "READY":
@@ -47,6 +50,7 @@ class QQGateway:
                 self.on_message(payload["d"])
 
     def serve(self, socket: ClientConnection) -> None:
+        """处理单条网关连接的登录、心跳确认和事件，直到关闭或需重连。"""
         hello = json.loads(socket.recv(timeout=self.client.config.timeout))
         if hello["op"] != 10:
             raise RuntimeError("QQ 网关没有返回 Hello 消息。")
@@ -91,6 +95,7 @@ class QQGateway:
                     raise ConnectionError("QQ 网关请求重新连接。")
 
     def run(self) -> None:
+        """持续连接网关并退避重连，永久权限错误终止接收。"""
         delay = 1
         while not self._stopping.is_set():
             try:
@@ -126,6 +131,7 @@ class QQGateway:
             delay = min(delay * 2, 30)
 
     def close(self) -> None:
+        """设置停止信号并关闭当前连接，唤醒阻塞接收。"""
         self._stopping.set()
         if self._socket is not None:
             self._socket.close()

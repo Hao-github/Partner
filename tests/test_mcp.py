@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from mcp.types import CallToolResult, TextContent, Tool
 
+from ai_butler.models import ModelSelection
 from ai_butler.tools._mcp import MCPClient
 from ai_butler.tools.registry import ToolRegistry
 from tests.helpers import ProjectTest
@@ -18,18 +19,15 @@ class MCPTests(ProjectTest):
         return registry
 
     def test_stdio_discovery_execution_context_and_worker_lifecycle(self):
-        registry = self.registry()
+        registry = self.registry(
+            config_version="v2",
+            options={"CONDA_DEFAULT_ENV": "gptpartner", "PRIVATE_KEY": "hidden-key"},
+        )
         self.assertEqual(
             [tool["function"]["name"] for tool in registry.schemas],
             ["get_version"],
         )
-        selected = replace(
-            self.settings,
-            provider="openai",
-            model="session-model",
-            config_version="v2",
-            options={"CONDA_DEFAULT_ENV": "gptpartner", "PRIVATE_KEY": "hidden-key"},
-        )
+        selected = ModelSelection("openai", "session-model")
         with ThreadPoolExecutor(max_workers=1) as worker:
             result = worker.submit(registry.execute, "get_version", "{}", selected).result(15)
         data = json.loads(result)
@@ -94,7 +92,7 @@ class MCPTests(ProjectTest):
         registry._amap.list_tools.side_effect = RuntimeError("service unavailable")
         with self.assertLogs("ai_butler.tools.registry", "WARNING"):
             self.assertEqual(len(registry.schemas), 1)
-        result = registry.execute("get_version", "{}", self.settings)
+        result = registry.execute("get_version", "{}")
         self.assertEqual(json.loads(result)["model"]["version"], self.settings.model)
 
     def test_mcp_timeout_does_not_expose_transport_error(self):

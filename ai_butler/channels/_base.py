@@ -13,6 +13,7 @@ class Channel(ABC):
     """平台收发契约、停止状态与清理钩子，不处理历史或持久化。"""
 
     def __init__(self, settings: Config = config):
+        """保存只读启动配置并创建平台共用的停止信号。"""
         self._settings = settings
         self._stopping = Event()
 

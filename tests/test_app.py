@@ -43,8 +43,8 @@ class AppTests(ProjectTest):
         channel_type = ChannelService._channel_type
         settings = replace(
             self.settings,
-            options=self.settings.options
-            | {
+            options={
+                **self.settings.options,
                 "EXTRA_API_KEY": "test-extra-key",
                 "EXTRA_MODEL": "configured-extra",
                 "EXTRA_BASE_URL": "https://custom.extra.invalid",
@@ -69,7 +69,7 @@ class AppTests(ProjectTest):
         self.assertEqual(
             created[0].sent, ["configured-extra: hello", "已切换模型：extra / next", "next: again"]
         )
-        self.assertEqual(created[0]._settings.base_url, "https://custom.extra.invalid")
+        self.assertIs(created[0]._settings, settings)
         self.assertTrue(created[0]._stopping.is_set())
         store = self.store()
         self.assertEqual(len(store.load("extra:owner")), 4)
@@ -110,24 +110,26 @@ class AppTests(ProjectTest):
 
     def test_cli_runtime_options_select_model_without_mutating_shared_config(self):
         settings = replace(
-            self.settings, options=self.settings.options | {"OPENAI_API_KEY": "test-openai"}
+            self.settings, options={**self.settings.options, "OPENAI_API_KEY": "test-openai"}
         )
         with (
             patch("main.config", settings),
             patch.object(
                 ModelService, "_create_provider", wraps=ModelService._create_provider
             ) as factory,
-            patch("ai_butler.providers._openai.OpenAIProvider.complete") as complete,
+            patch("ai_butler.providers._openai.OpenAIProvider.complete", autospec=True) as complete,
             patch("builtins.input", side_effect=["测试消息", "/exit"]),
             redirect_stdout(StringIO()),
         ):
             complete.return_value = {"role": "assistant", "content": "测试回答"}
             status = main(["--channel", "cli", "--provider", "openai", "--model", "test-model"])
         self.assertEqual(status, 0)
-        selected = factory.call_args.args[0]
+        self.assertIs(factory.call_args.args[0], settings)
+        self.assertEqual(factory.call_args.kwargs, {"provider": "openai", "model": "test-model"})
+        selected = complete.call_args.args[0].config
         self.assertEqual(selected.provider, "openai")
         self.assertEqual(selected.model, "test-model")
-        self.assertEqual(selected.base_url, "")
+        self.assertEqual(selected.base_url, "https://api.openai.com/v1")
         self.assertEqual(settings.provider, "deepseek")
         self.assertEqual(settings.model, "deepseek-flash")
         self.assertEqual(len(self.store().load("live:default")), 2)
@@ -274,7 +276,7 @@ class ModelSwitchTests(ProjectTest):
     def run_cli(self, inputs, *, settings=None):
         output = StringIO()
         settings = settings or replace(
-            self.settings, options=self.settings.options | {"OPENAI_API_KEY": "test-openai"}
+            self.settings, options={**self.settings.options, "OPENAI_API_KEY": "test-openai"}
         )
         with (
             patch("main.config", settings),
@@ -392,7 +394,7 @@ class ModelSwitchTests(ProjectTest):
 
     def test_redelivering_old_qq_switch_does_not_revert_new_selection(self):
         settings = replace(
-            self.settings, options=self.settings.options | {"OPENAI_API_KEY": "test-openai"}
+            self.settings, options={**self.settings.options, "OPENAI_API_KEY": "test-openai"}
         )
         channel = RecordingChannel(settings)
         session = "qq:123:c2c:owner"

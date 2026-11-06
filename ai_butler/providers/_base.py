@@ -4,6 +4,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from http.client import HTTPException
 from typing import Any, ClassVar
 from urllib.error import HTTPError
@@ -26,14 +27,53 @@ def _response_errors(provider: str) -> Generator[None, None, None]:
         ) from None
 
 
+@dataclass(frozen=True)
+class ModelConfig:
+    """单个模型客户端的完整只读配置，不携带渠道、存储或其他供应商选项。"""
+
+    provider: str
+    model: str
+    base_url: str
+    api_key: str = field(repr=False)
+    timeout: float
+    max_retries: int
+    max_output_tokens: int
+
+    def __post_init__(self) -> None:
+        """在模型配置创建时校验凭据、模型与地址，之后不再补写字段。"""
+        object.__setattr__(self, "base_url", self.base_url.rstrip("/"))
+        if not self.api_key.strip():
+            raise ValueError(f"请在项目 .env 中填写 {self.provider.upper()}_API_KEY。")
+        if not self.api_key.isascii() or any(char.isspace() for char in self.api_key):
+            raise ValueError("API Key 不能包含非 ASCII 字符或空白。")
+        if not self.model.strip():
+            raise ValueError("请在 .env 中设置 BUTLER_MODEL。")
+        if not self.base_url.startswith("https://"):
+            raise ValueError("BUTLER_BASE_URL 必须使用 HTTPS。")
+
+
 class Provider(ABC):
     """内部模型端口；共用 HTTP 传输，具体协议由各供应商实现。"""
 
+    name: ClassVar[str]
     default_model: ClassVar[str] = ""
     default_base_url: ClassVar[str] = ""
 
-    def __init__(self, settings: Config = config):
-        self.config = settings
+    def __init__(self, settings: Config = config, *, model: str | None = None):
+        """仅在创建客户端时解析本供应商配置；启动覆盖不串用到其他供应商。"""
+        same_provider = self.name == settings.provider
+        prefix = self.name.upper()
+        self.config = ModelConfig(
+            provider=self.name,
+            model=(model if model is not None else (settings.model if same_provider else ""))
+            or settings.options.get(f"{prefix}_MODEL", self.default_model),
+            base_url=(settings.base_url if same_provider else "")
+            or settings.options.get(f"{prefix}_BASE_URL", self.default_base_url),
+            api_key=settings.options.get(f"{prefix}_API_KEY", ""),
+            timeout=settings.timeout,
+            max_retries=settings.max_retries,
+            max_output_tokens=settings.max_output_tokens,
+        )
 
     @abstractmethod
     def complete(self, messages: list[Message], tools: list[dict[str, Any]]) -> Message:

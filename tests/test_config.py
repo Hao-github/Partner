@@ -3,14 +3,15 @@ import os
 import shutil
 import subprocess
 import sys
-from dataclasses import replace
+from dataclasses import FrozenInstanceError, replace
+from operator import setitem
 from pathlib import Path
 from unittest.mock import patch
 
 from ai_butler.config import Config, config
 from ai_butler.core import agent as agent_module
 from ai_butler.providers import ModelService
-from ai_butler.providers._deepseek import DeepSeekProvider
+from ai_butler.providers import _base as provider_module
 from tests.helpers import ProjectTest
 
 
@@ -30,18 +31,17 @@ class ConfigTests(ProjectTest):
             clear=True,
         ):
             settings = Config()
-        settings = ModelService._create_provider(settings).config
-        self.assertEqual(settings.api_key, "test-key")
+        resolved = ModelService._create_provider(settings).config
+        self.assertEqual(resolved.api_key, "test-key")
         self.assertEqual(settings.config_version, "test-v2")
-        self.assertEqual(settings.base_url, "https://api.openai.com/v1")
+        self.assertEqual(resolved.base_url, "https://api.openai.com/v1")
         self.assertEqual(settings.timeout, 12.5)
         self.assertEqual(settings.max_retries, 1)
         self.assertEqual(settings.history_turns, 8)
-        self.assertNotIn("test-key", repr(settings))
+        self.assertNotIn("test-key", f"{settings!r}{resolved!r}")
 
     def test_modules_share_the_same_config_instance(self):
-        provider = DeepSeekProvider()
-        self.assertIs(provider.config, config)
+        self.assertIs(provider_module.config, config)
         self.assertIs(agent_module.config, config)
 
     def test_dotenv_is_read_from_project_root_outside_working_directory(self):
@@ -70,7 +70,7 @@ class ConfigTests(ProjectTest):
                 "-B",
                 "-c",
                 (
-                    "import json; from ai_butler.config import config; config.validate(); "
+                    "import json; from ai_butler.config import config; "
                     "print(json.dumps([config.model, config.timeout, str(config.db_path)]))"
                 ),
             ],
@@ -94,24 +94,29 @@ class ConfigTests(ProjectTest):
 
     def test_missing_key_has_clear_message(self):
         with self.assertRaisesRegex(ValueError, "DEEPSEEK_API_KEY"):
-            replace(self.settings, options={}).validate()
+            ModelService(settings=replace(self.settings, options={}))
 
-    def test_select_model_resets_other_provider_defaults_and_preserves_source(self):
-        selected = self.settings.select_model(provider=" OpenAI ", model="test-model")
+    def test_provider_initialization_uses_own_defaults_and_preserves_startup_config(self):
+        settings = replace(
+            self.settings, options={**self.settings.options, "OPENAI_API_KEY": "test-openai"}
+        )
+        selected = ModelService._create_provider(
+            settings, provider=" OpenAI ", model="test-model"
+        ).config
         self.assertEqual(selected.provider, "openai")
-        self.assertEqual(selected.base_url, "")
+        self.assertEqual(selected.base_url, "https://api.openai.com/v1")
         self.assertEqual(selected.model, "test-model")
         self.assertEqual(self.settings.provider, "deepseek")
         self.assertEqual(self.settings.base_url, "https://api.deepseek.com")
-        deepseek = selected.select_model(provider="deepseek")
-        self.assertEqual((deepseek.model, deepseek.base_url), ("", ""))
-        resolved = ModelService._create_provider(deepseek).config
+        resolved = ModelService._create_provider(
+            replace(settings, model="", base_url=""), provider="deepseek"
+        ).config
         self.assertEqual(resolved.model, "deepseek-flash")
         self.assertEqual(resolved.base_url, "https://api.deepseek.com")
 
-    def test_select_model_keeps_same_provider_custom_endpoint(self):
+    def test_provider_initialization_keeps_same_provider_custom_endpoint(self):
         settings = replace(self.settings, base_url="https://test.invalid")
-        selected = settings.select_model(model="custom-model")
+        selected = ModelService._create_provider(settings, model="custom-model").config
         self.assertEqual(selected.base_url, "https://test.invalid")
         self.assertEqual(selected.model, "custom-model")
 
@@ -142,12 +147,30 @@ class ConfigTests(ProjectTest):
         with patch.dict(os.environ, {"FUTURE_API_KEY": "private-key", "FUTURE_LIMIT": "7"}):
             settings = Config(provider="future")
             os.environ["FUTURE_LIMIT"] = "8"
-        self.assertEqual(settings.api_key, "private-key")
+        self.assertEqual(settings.options["FUTURE_API_KEY"], "private-key")
         self.assertEqual(settings.options["FUTURE_LIMIT"], "7")
         self.assertNotIn("private-key", repr(settings))
-        changed = replace(settings, options=settings.options | {"FUTURE_LIMIT": "9"})
+        changed = replace(settings, options={**settings.options, "FUTURE_LIMIT": "9"})
         self.assertEqual(changed.options["FUTURE_LIMIT"], "9")
         self.assertEqual(settings.options["FUTURE_LIMIT"], "7")
+
+    def test_startup_config_and_options_are_frozen_and_detached_from_input(self):
+        options = {"FUTURE_LIMIT": "7"}
+        settings = replace(self.settings, provider=" DeepSeek ", options=options)
+        options["FUTURE_LIMIT"] = "8"
+        self.assertEqual(settings.provider, "deepseek")
+        self.assertEqual(settings.options["FUTURE_LIMIT"], "7")
+        self.assertRaises(FrozenInstanceError, setattr, settings, "model", "changed")
+        self.assertRaises(TypeError, setitem, settings.options, "FUTURE_LIMIT", "9")
+
+    def test_model_config_is_complete_frozen_and_does_not_expose_startup_options(self):
+        resolved = ModelService._create_provider(self.settings).config
+        self.assertEqual(resolved.model, "deepseek-flash")
+        self.assertEqual(resolved.api_key, "test-secret")
+        self.assertNotIn("test-secret", repr(resolved))
+        self.assertFalse(hasattr(resolved, "options"))
+        self.assertFalse(hasattr(resolved, "qq_app_secret"))
+        self.assertRaises(FrozenInstanceError, setattr, resolved, "model", "changed")
 
     def test_secret_is_hidden_from_config_repr(self):
         settings = replace(self.settings, qq_app_secret="private-secret")

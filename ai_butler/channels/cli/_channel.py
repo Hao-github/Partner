@@ -13,6 +13,7 @@ _SESSION_PATTERN = re.compile(r"[\w.-]{1,64}\Z")
 
 
 def _session_name(value: str) -> str:
+    """在终端输入边界校验会话名，拒绝空值和非法字符。"""
     if not _SESSION_PATTERN.fullmatch(value):
         raise ValueError("会话名限 1–64 个中文、字母、数字、下划线、点或短横线。")
     return value
@@ -28,11 +29,13 @@ class CLIChannel(Channel):
         *,
         history: Callable[[str], list[Message]],
     ):
+        """校验初始会话并保存只读历史回调，不直接访问存储。"""
         super().__init__(settings)
         self._session = _session_name(session)
         self._history = history
 
     def _receive(self, handler: IncomingHandler) -> None:
+        """读取输入并处理终端命令，其余消息交给业务回调。"""
         print(f"AI 管家 | 会话：{self._session}")
         print(_HELP)
         while not self._stopping.is_set():
@@ -58,6 +61,7 @@ class CLIChannel(Channel):
                 print("\n已取消当前回复，此轮未保存。可以继续输入或 /exit。")
 
     def _command(self, text: str) -> bool:
+        """执行帮助、切会话和历史命令，返回是否已消费输入。"""
         if text == "/help":
             print(_HELP)
         elif text == "/session" or text.startswith("/session "):
@@ -73,6 +77,7 @@ class CLIChannel(Channel):
         return True
 
     def _show_history(self) -> None:
+        """通过回调读取当前会话，只显示用户和助手的非空文本。"""
         history = self._history(f"live:{self._session}")
         if not history:
             print("当前会话暂无记录。")

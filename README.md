@@ -95,9 +95,11 @@ print(config.model)
 print(config.history_turns)
 ```
 
-模块加载时，`python-dotenv` 从项目 `.env` 读取变量；dataclass `Config()` 保存环境快照及公共配置，生成共享实例 `config`。供应商工厂应用所选子类的默认模型和地址后校验。环境变量优先于 `.env`。修改 `.env` 后重启程序生效，不会在每条消息中重复读取文件。
+模块加载时，`python-dotenv` 从项目 `.env` 读取变量；冻结的 dataclass `Config()` 在初始化时归一化并校验公共配置，生成共享实例 `config`。`options` 复制为只读环境快照，不受原字典后续修改影响。环境变量优先于 `.env`，修改后重启程序生效。
 
-业务代码使用共享实例；测试可传入单独的 `Config(...)`，以隔离模型配置和临时数据库。修改副本直接使用 `dataclasses.replace`，例如 `replace(settings, options=settings.options | {"OPENAI_API_KEY": "test-key"})`。`Config.model`、base_url 在未显式配置时可为空，由工厂填入供应商默认值。暂不自定义异常层级：配置问题使用 `ValueError`，模型与工具循环失败使用 `RuntimeError`。
+Provider 初始化时按当前供应商解析模型、地址和凭据，生成完整、冻结的 `ModelConfig`；工厂只选择类型并构造实例。`Config.model`、`base_url` 可作为启动覆盖留空，默认值仍由 Provider 子类维护。会话切换只传 `ModelSelection`，不复制或修改启动配置，客户端验证成功后由 ModelService 缓存。
+
+测试可传入独立的 `Config(...)` 隔离配置和临时数据库；需要不同快照时使用 `dataclasses.replace`，例如 `replace(settings, options={**settings.options, "OPENAI_API_KEY": "test-key"})`。配置问题使用 `ValueError`，模型与工具循环失败使用 `RuntimeError`。
 
 | 变量 | 默认 / 用途 |
 | --- | --- |

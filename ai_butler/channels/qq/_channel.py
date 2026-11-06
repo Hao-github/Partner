@@ -20,6 +20,7 @@ class QQChannel(Channel):
     """
 
     def __init__(self, settings: Config = config):
+        """校验 QQ 配置并装配客户端及单工作线程，尚不连接网关。"""
         settings.validate_qq()
         super().__init__(settings)
         self._client = _QQClient(settings)
@@ -46,10 +47,12 @@ class QQChannel(Channel):
             gateway.close()
 
     def _receive(self, handler: IncomingHandler) -> None:
+        """运行网关，将平台事件转换为工作线程中的统一消息回调。"""
         self._gateway = _QQGateway(self._client, lambda data: self._accept(data, handler))
         self._gateway.run()
 
     def _accept(self, data: dict, handler: IncomingHandler) -> None:
+        """过滤发送者和消息类型，在队列限额内提交统一消息。"""
         user_id = data["author"]["user_openid"]
         text = data.get("content", "").strip()
         if user_id not in self._settings.qq_allowed_users or not text:
@@ -71,12 +74,14 @@ class QQChannel(Channel):
         self._executor.submit(handler, incoming).add_done_callback(self._done)
 
     def _done(self, future: Future) -> None:
+        """归还任务名额，仅用固定日志报告后台失败以保护私聊和凭据。"""
         self._slots.release()
         if not future.cancelled() and future.exception() is not None:
             # 不输出异常正文，防止第三方错误带回私聊内容或凭据。
             logger.error("qq_message_failed; 检查网络、平台权限及模型配置后重新提问")
 
     def failure_reply(self, error: RuntimeError) -> str:
+        """向 QQ 用户提供统一失败提示，不暴露内部请求细节。"""
         return "这次模型请求没有完成，请稍后重新提问。"
 
     def _send(self, incoming: IncomingMessage, text: str) -> None:

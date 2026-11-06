@@ -11,8 +11,8 @@ from ai_butler import Agent
 from ai_butler.channels._base import Channel, IncomingHandler
 from ai_butler.config import Config
 from ai_butler.models import IncomingMessage, Message
-from ai_butler.providers import ModelService
 from ai_butler.providers._base import Provider
+from ai_butler.providers._deepseek import DeepSeekProvider
 from ai_butler.storage.sessions import SessionStore
 
 VERSION_TOOL = {
@@ -51,6 +51,7 @@ def tool_message(*call_ids: str):
 class ExtraProvider(Provider):
     """只在测试中使用的第三种协议适配，验证主流程不依赖供应商名称。"""
 
+    name = "extra"
     default_model = "extra-default"
     default_base_url = "https://extra.invalid"
 
@@ -93,9 +94,10 @@ class ProjectTest(unittest.TestCase):
 
     def create_agent(self, provider, **changes):
         settings = replace(self.settings, **changes)
-        provider.config = settings
-        with patch.object(ModelService, "_create_provider", return_value=provider):
-            agent = Agent(settings=settings)
+        patcher = patch.object(DeepSeekProvider, "complete", provider.complete)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        agent = Agent(settings=settings)
         self.addCleanup(agent.close)
         return agent
 

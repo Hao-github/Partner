@@ -6,6 +6,7 @@ from ai_butler.config import config
 
 
 def main(argv=None) -> int:
+    """解析启动参数并运行 Agent 或渠道诊断，将安全错误映射为退出码。"""
     parser = argparse.ArgumentParser(description="私人 AI 管家")
     parser.add_argument("--channel", default="cli", help="输入输出渠道，由内部工厂选择")
     parser.add_argument("--provider", help="模型供应商，默认读取配置")
